@@ -7,7 +7,7 @@
    -------------------------------------------------------------------------- */
 .navbar {
   background-color: #352264;
-  background-image: 
+  background-image:
     linear-gradient(rgba(255, 255, 255, 0.016) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.016) 1px, transparent 1px),
     linear-gradient(135deg, #2d1c54 0%, #352264 55%, #422a7a 100%);
@@ -29,14 +29,12 @@
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(
-    90deg,
-    rgba(255, 255, 255, 0) 0%,
-    rgba(255, 255, 255, 0.18) 35%,
-    rgba(255, 255, 255, 0.35) 50%,
-    rgba(255, 255, 255, 0.18) 65%,
-    rgba(255, 255, 255, 0) 100%
-  );
+  background: linear-gradient(90deg,
+      rgba(255, 255, 255, 0) 0%,
+      rgba(255, 255, 255, 0.18) 35%,
+      rgba(255, 255, 255, 0.35) 50%,
+      rgba(255, 255, 255, 0.18) 65%,
+      rgba(255, 255, 255, 0) 100%);
   pointer-events: none;
 }
 
@@ -172,6 +170,17 @@
   border: 1px solid rgba(255, 255, 255, 0.28);
 }
 
+/* Targets the logout link in the main navbar */
+.main-nav a.nav-logout-btn {
+  color: #ff6b6b !important;
+  font-weight: 600;
+}
+
+.main-nav a.nav-logout-btn:hover {
+  color: #ff5252 !important;
+  background-color: rgba(255, 107, 107, 0.12) !important;
+}
+
 /* --------------------------------------------------------------------------
    2. Modern Animated Hamburger Toggle
    -------------------------------------------------------------------------- */
@@ -271,6 +280,7 @@
     opacity: 0;
     transform: translateY(-10px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -333,6 +343,7 @@
   color: var(--status-pending-text);
   border: 1px solid var(--status-pending-border);
 }
+
 .status-pill.warning::before,
 .status-pill.pending::before {
   background-color: var(--status-pending-dot);
@@ -345,6 +356,7 @@
   color: var(--status-approved-text);
   border: 1px solid var(--status-approved-border);
 }
+
 .status-pill.success::before,
 .status-pill.approved::before {
   background-color: var(--status-approved-dot);
@@ -357,6 +369,7 @@
   color: var(--status-progress-text);
   border: 1px solid var(--status-progress-border);
 }
+
 .status-pill.purple::before,
 .status-pill.in-progress::before {
   background-color: var(--status-progress-dot);
@@ -369,6 +382,7 @@
   color: var(--status-completed-text);
   border: 1px solid var(--status-completed-border);
 }
+
 .status-pill.info::before,
 .status-pill.completed::before {
   background-color: var(--status-completed-dot);
@@ -381,6 +395,7 @@
   color: var(--status-rejected-text);
   border: 1px solid var(--status-rejected-border);
 }
+
 .status-pill.danger::before,
 .status-pill.rejected::before {
   background-color: var(--status-rejected-dot);
@@ -393,6 +408,7 @@
   color: var(--status-banned-text);
   border: 1px solid var(--status-banned-border);
 }
+
 .status-pill.dark::before,
 .status-pill.banned::before {
   background-color: var(--status-banned-dot);
@@ -626,6 +642,17 @@
 
 .footer-nav-list a:hover {
   color: #ffffff;
+  transform: translateX(4px);
+}
+
+/* Footer Quick Links Logout Button */
+.footer-nav-list a.footer-logout-btn {
+  color: #ff6b6b !important;
+  font-weight: 600;
+}
+
+.footer-nav-list a.footer-logout-btn:hover {
+  color: #ff5252 !important;
   transform: translateX(4px);
 }
 

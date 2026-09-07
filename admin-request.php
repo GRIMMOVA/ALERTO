@@ -1,3 +1,53 @@
+<?php
+session_start();
+require_once 'alerto-db.php';
+
+// 1. Process logout request first
+if (isset($_GET['action']) && $_GET['action'] === 'logout') {
+    session_unset();
+    session_destroy();
+    header("Location: admin-login.php");
+    exit;
+}
+
+// 2. Protect page with session guard
+if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role'], ['admin', 'superadmin'])) {
+    header("Location: admin-login.php");
+    exit;
+}
+
+// 3. Handle request status updates via standard POST submission
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['request_id'], $_POST['status'])) {
+    $req_id = intval($_POST['request_id']);
+    $req_status = trim($_POST['status']);
+    
+    if (in_array($req_status, ['pending', 'approved', 'in_progress', 'completed', 'archived', 'cancelled'])) {
+        $stmt = $pdo->prepare("UPDATE assistance_requests SET status = ? WHERE id = ?");
+        $stmt->execute([$req_status, $req_id]);
+        
+        header("Location: admin-request.php");
+        exit;
+    }
+}
+
+// 4. Fetch all student assistance requests from database (including archived so they can be filtered)
+$stmt = $pdo->prepare("
+    SELECT r.*, u.full_name, u.student_id, u.email, u.contact_number, u.program, u.year_level 
+    FROM assistance_requests r
+    JOIN users u ON r.user_id = u.id
+    ORDER BY r.id DESC
+");
+$stmt->execute();
+$requests = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Count pending verifications dynamically for sidebar badge
+$stmtPending = $pdo->query("SELECT COUNT(*) FROM users WHERE role = 'student' AND status = 'unverified'");
+$pendingVerificationCount = $stmtPending->fetchColumn();
+
+// Active Requests count for sidebar & top right (Pending, Approved, In Progress)
+$stmtActiveCount = $pdo->query("SELECT COUNT(*) FROM assistance_requests WHERE LOWER(status) IN ('pending', 'approved', 'in_progress', 'in progress')");
+$activeRequestsCount = $stmtActiveCount->fetchColumn();
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -18,6 +68,13 @@
   <link rel="stylesheet" href="assets/css/main.css">
   <link rel="stylesheet" href="assets/css/components.css">
   <link rel="stylesheet" href="assets/css/admin.css">
+  <style>
+    /* Ensure status pills never break text formatting across lines */
+    .status-pill {
+      white-space: nowrap !important;
+      display: inline-block;
+    }
+  </style>
 </head>
 <body>
 
@@ -32,7 +89,7 @@
     <aside class="admin-sidebar" id="adminSidebar" aria-label="Admin Sidebar Navigation">
       
       <!-- Sidebar Brand -->
-      <a href="admin-homepage.html" class="sidebar-brand">
+      <a href="admin-homepage.php" class="sidebar-brand">
         <div class="sidebar-logo">
           <img src="logo/csulogo.png" alt="CSU Logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
           <div class="sidebar-logo-placeholder" style="display: none;" aria-hidden="true">A</div>
@@ -45,7 +102,7 @@
 
       <!-- Sidebar Navigation Menu -->
       <nav class="sidebar-nav">
-        <a href="admin-homepage.html" class="nav-item-link">
+        <a href="admin-homepage.php" class="nav-item-link">
           <span class="nav-item-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
@@ -55,7 +112,7 @@
           <span>Dashboard</span>
         </a>
 
-        <a href="admin-verify.html" class="nav-item-link">
+        <a href="admin-verify.php" class="nav-item-link">
           <span class="nav-item-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
@@ -65,10 +122,10 @@
             </svg>
           </span>
           <span>Verifications</span>
-          <span class="nav-item-badge">14</span>
+          <span class="nav-item-badge"><?= $pendingVerificationCount ?></span>
         </a>
 
-        <a href="admin-request.html" class="nav-item-link active">
+        <a href="admin-request.php" class="nav-item-link active">
           <span class="nav-item-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -76,16 +133,36 @@
             </svg>
           </span>
           <span>Requests</span>
-          <span class="nav-item-badge">18</span>
+          <span class="nav-item-badge"><?= $activeRequestsCount ?></span>
         </a>
+
+        <?php if ($_SESSION['role'] === 'superadmin'): ?>
+        <a href="admin-add-sign-in.php" class="nav-item nav-item-link">
+          <span class="nav-item-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+              <circle cx="9" cy="7" r="4"></circle>
+              <line x1="20" y1="8" x2="20" y2="14"></line>
+              <line x1="23" y1="11" x2="17" y2="11"></line>
+            </svg>
+          </span>
+          <span>+ Add New Admin</span>
+        </a>
+        <?php endif; ?>
       </nav>
 
       <!-- Sidebar Footer -->
       <div class="sidebar-footer">
-        <a href="admin-homepage.html" class="sidebar-home-link">
-          <span>&larr; Back to Public Portal</span>
+        <a href="?action=logout" class="sidebar-logout-link">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+            <polyline points="16 17 21 12 16 7"></polyline>
+            <line x1="21" y1="12" x2="9" y2="12"></line>
+          </svg>
+          <span>Logout</span>
         </a>
-        <span>&copy; 2026 ALERTO Operations Center</span>
+
+        <span>&copy; 2026 CSU-COEA Student Council</span>
       </div>
 
     </aside>
@@ -107,7 +184,7 @@
           </button>
           <span style="font-family: var(--heading-font); font-weight: 800; color: var(--admin-purple-mid); font-size: 1.15rem;">ALERTO Admin</span>
         </div>
-        <a href="admin-homepage.html" class="table-action-btn" style="font-size: var(--fs-2xs);">Exit Portal</a>
+        <a href="admin-homepage.php" class="table-action-btn" style="font-size: var(--fs-2xs);">Exit Portal</a>
       </header>
 
       <div class="admin-content-body">
@@ -120,8 +197,8 @@
             <p class="admin-page-desc">Review, prioritize, assign, and monitor submitted assistance requests.</p>
           </div>
           <div class="admin-top-stat">
-            <div class="top-stat-number" id="totalRequestsCount">18</div>
-            <div class="top-stat-label">Total Requests</div>
+            <div class="top-stat-number" id="totalRequestsCount"><?= $activeRequestsCount ?></div>
+            <div class="top-stat-label">Active Requests</div>
           </div>
         </div>
 
@@ -139,9 +216,10 @@
             <select class="status-select-dropdown" id="statusFilterSelect" aria-label="Filter by request status">
               <option value="all">All Status</option>
               <option value="pending">Pending</option>
-              <option value="in progress">In Progress</option>
-              <option value="completed">Completed</option>
               <option value="approved">Approved</option>
+              <option value="in_progress">In Progress</option>
+              <option value="completed">Completed</option>
+              <option value="archived">Archived</option>
             </select>
           </div>
         </div>
@@ -162,121 +240,77 @@
                 </tr>
               </thead>
               <tbody id="requestsTableBody">
-                
-                <!-- Row 1: Kriz Bonifacio -->
-                <tr data-status="pending" data-search="REQ-00021 Kriz Bonifacio Food, Water Packs Carig Sur 24-00909">
-                  <td><span class="table-id-badge">REQ-00021</span></td>
-                  <td>
-                    <div class="table-primary-text">Kriz Bonifacio</div>
-                    <div class="table-secondary-text">24-00909</div>
-                  </td>
-                  <td>
-                    <span class="table-primary-text">Food, Water Packs</span>
-                  </td>
-                  <td>Carig Sur</td>
-                  <td><span class="status-pill pending">Pending</span></td>
-                  <td>Aug 8, 2026</td>
-                  <td style="text-align: right;">
-                    <button type="button" class="table-action-btn" onclick="openRequestModal('REQ-00021', 'Kriz Bonifacio', '24-00909', '0917 890 1234', 'kriz@gmail.com', 'Food, Water Packs', 'Carig Sur (Near Barangay Hall)', 'Pending', 'Aug 8, 2026', 'Family of 4 stranded due to floodwaters reaching knee level.', 17.6542, 121.7513)">View</button>
-                  </td>
+                <?php if (empty($requests)): ?>
+                <tr>
+                  <td colspan="7" style="text-align: center; padding: 40px; color: var(--admin-muted);">No assistance requests found in the database.</td>
                 </tr>
+                <?php else: ?>
+                  <?php foreach ($requests as $req): 
+                      $requestCode = !empty($req['request_code']) ? $req['request_code'] : 'REQ-' . str_pad($req['id'], 5, '0', STR_PAD_LEFT);
+                      $statusRaw = trim($req['status'] ?? 'pending');
+                      $statusLower = strtolower($statusRaw);
+                      
+                      // Map status classes
+                      $pillClass = 'pending';
+                      $statusLabel = 'Pending';
+                      if ($statusLower === 'approved') {
+                          $pillClass = 'approved';
+                          $statusLabel = 'Approved';
+                      } elseif (strpos($statusLower, 'in_progress') !== false || strpos($statusLower, 'in progress') !== false) {
+                          $pillClass = 'in-progress';
+                          $statusLabel = 'In Progress';
+                          $statusLower = 'in_progress';
+                      } elseif ($statusLower === 'completed') {
+                          $pillClass = 'completed';
+                          $statusLabel = 'Completed';
+                      } elseif ($statusLower === 'archived') {
+                          $pillClass = 'archived';
+                          $statusLabel = 'Archived';
+                      }
 
-                <!-- Row 2: Aries Quinto -->
-                <tr data-status="in progress" data-search="REQ-00022 Aries Quinto First Aid, Medicine Caritan Norte">
-                  <td><span class="table-id-badge">REQ-00022</span></td>
-                  <td>
-                    <div class="table-primary-text">Aries Quinto</div>
-                    <div class="table-secondary-text">COEA-2022-0891</div>
-                  </td>
-                  <td>
-                    <span class="table-primary-text">First Aid / Medicine</span>
-                  </td>
-                  <td>Caritan Norte</td>
-                  <td><span class="status-pill in-progress">In Progress</span></td>
-                  <td>Aug 8, 2026</td>
-                  <td style="text-align: right;">
-                    <button type="button" class="table-action-btn" onclick="openRequestModal('REQ-00022', 'Aries Quinto', 'COEA-2022-0891', '0918 555 4321', 'aries.quinto@csu.edu.ph', 'First Aid / Medicine', 'Caritan Norte, Zone 2', 'In Progress', 'Aug 8, 2026', 'Requires basic first aid kit and hypertension medication refill.', 17.6588, 121.7482)">View</button>
-                  </td>
-                </tr>
-
-                <!-- Row 3: Jade Biscuera -->
-                <tr data-status="completed" data-search="REQ-00023 Jade Biscuera Relief Goods San Gabriel">
-                  <td><span class="table-id-badge">REQ-00023</span></td>
-                  <td>
-                    <div class="table-primary-text">Jade Biscuera</div>
-                    <div class="table-secondary-text">COEA-2024-0055</div>
-                  </td>
-                  <td>
-                    <span class="table-primary-text">Relief Goods</span>
-                  </td>
-                  <td>San Gabriel</td>
-                  <td><span class="status-pill completed">Completed</span></td>
-                  <td>Aug 7, 2026</td>
-                  <td style="text-align: right;">
-                    <button type="button" class="table-action-btn" onclick="openRequestModal('REQ-00023', 'Jade Biscuera', 'COEA-2024-0055', '0920 123 9876', 'jade.biscuera@csu.edu.ph', 'Relief Goods', 'San Gabriel, Centro', 'Completed', 'Aug 7, 2026', 'Food packs and sanitary kits successfully delivered by Team B.', 17.6412, 121.7354)">View</button>
-                  </td>
-                </tr>
-
-                <!-- Row 4: Noriel Samoy -->
-                <tr data-status="approved" data-search="REQ-00024 Noriel Samoy Emergency Shelter Annafunan East">
-                  <td><span class="table-id-badge">REQ-00024</span></td>
-                  <td>
-                    <div class="table-primary-text">Noriel Samoy</div>
-                    <div class="table-secondary-text">COEA-2021-0331</div>
-                  </td>
-                  <td>
-                    <span class="table-primary-text">Emergency Shelter</span>
-                  </td>
-                  <td>Annafunan East</td>
-                  <td><span class="status-pill approved">Approved</span></td>
-                  <td>Aug 7, 2026</td>
-                  <td style="text-align: right;">
-                    <button type="button" class="table-action-btn" onclick="openRequestModal('REQ-00024', 'Noriel Samoy', 'COEA-2021-0331', '0935 777 8899', 'noriel.samoy@csu.edu.ph', 'Emergency Shelter', 'Annafunan East', 'Approved', 'Aug 7, 2026', 'Approved for temporary shelter coordination at CSU Covered Court.', 17.6321, 121.7219)">View</button>
-                  </td>
-                </tr>
-
-                <!-- Row 5: Vhon Sarsale -->
-                <tr data-status="pending" data-search="REQ-00025 Vhon Sarsale Food Relief Pack Pengue-Ruyu">
-                  <td><span class="table-id-badge">REQ-00025</span></td>
-                  <td>
-                    <div class="table-primary-text">Vhon Sarsale</div>
-                    <div class="table-secondary-text">COEA-2023-1102</div>
-                  </td>
-                  <td>
-                    <span class="table-primary-text">Food Relief Pack</span>
-                  </td>
-                  <td>Pengue-Ruyu</td>
-                  <td><span class="status-pill pending">Pending</span></td>
-                  <td>Aug 6, 2026</td>
-                  <td style="text-align: right;">
-                    <button type="button" class="table-action-btn" onclick="openRequestModal('REQ-00025', 'Vhon Sarsale', 'COEA-2023-1102', '0949 333 2211', 'vhon.sarsale@csu.edu.ph', 'Food Relief Pack', 'Pengue-Ruyu, Purok 3', 'Pending', 'Aug 6, 2026', 'Power outage in area, requires emergency dry food packs and clean water.', 17.6145, 121.7012)">View</button>
-                  </td>
-                </tr>
-
-                <!-- Row 6: Edward Calivoso -->
-                <tr data-status="in progress" data-search="REQ-00026 Edward Calivoso Hygiene Kit Carig Norte">
-                  <td><span class="table-id-badge">REQ-00026</span></td>
-                  <td>
-                    <div class="table-primary-text">Edward Calivoso</div>
-                    <div class="table-secondary-text">COEA-2024-0418</div>
-                  </td>
-                  <td>
-                    <span class="table-primary-text">Hygiene & Medical Kit</span>
-                  </td>
-                  <td>Carig Norte</td>
-                  <td><span class="status-pill in-progress">In Progress</span></td>
-                  <td>Aug 6, 2026</td>
-                  <td style="text-align: right;">
-                    <button type="button" class="table-action-btn" onclick="openRequestModal('REQ-00026', 'Edward Calivoso', 'COEA-2024-0418', '0908 444 1122', 'edward.calivoso@csu.edu.ph', 'Hygiene & Medical Kit', 'Carig Norte, Diversion Road', 'In Progress', 'Aug 6, 2026', 'Dispatched for personal care relief items.', 17.6254, 121.7150)">View</button>
-                  </td>
-                </tr>
-
+                      $resourcesVal = $req['resources'] ?? '';
+                      $landmarkVal = $req['landmark'] ?? '';
+                      $descriptionVal = $req['description'] ?? 'No additional remarks provided.';
+                      $submittedTimestamp = $req['submitted_at'] ?? $req['created_at'] ?? null;
+                      $submittedDateStr = $submittedTimestamp ? date('M j, Y', strtotime($submittedTimestamp)) : 'Recent';
+                  ?>
+                  <tr data-status="<?= $statusLower ?>" data-search="<?= htmlspecialchars(strtolower($requestCode . ' ' . $req['full_name'] . ' ' . $resourcesVal . ' ' . $landmarkVal . ' ' . $req['student_id'])) ?>">
+                    <td><span class="table-id-badge"><?= htmlspecialchars($requestCode) ?></span></td>
+                    <td>
+                      <div class="table-primary-text"><?= htmlspecialchars($req['full_name']) ?></div>
+                      <div class="table-secondary-text"><?= htmlspecialchars($req['student_id']) ?></div>
+                    </td>
+                    <td>
+                      <span class="table-primary-text"><?= htmlspecialchars($resourcesVal) ?></span>
+                    </td>
+                    <td><?= htmlspecialchars($landmarkVal) ?></td>
+                    <td><span class="status-pill <?= $pillClass ?>"><?= $statusLabel ?></span></td>
+                    <td><?= $submittedDateStr ?></td>
+                    <td style="text-align: right;">
+                      <button type="button" class="table-action-btn" onclick="openRequestModal(
+                        '<?= addslashes($requestCode) ?>',
+                        '<?= addslashes($req['full_name']) ?>',
+                        '<?= addslashes($req['student_id']) ?>',
+                        '<?= addslashes($req['contact_number'] ?? 'N/A') ?>',
+                        '<?= addslashes($req['email']) ?>',
+                        '<?= addslashes($resourcesVal) ?>',
+                        '<?= addslashes($landmarkVal) ?>',
+                        '<?= $statusLabel ?>',
+                        '<?= addslashes(str_replace(["\r", "\n"], ' ', $descriptionVal)) ?>',
+                        <?= $req['id'] ?>,
+                        <?= floatval($req['latitude'] ?? 17.6534) ?>,
+                        <?= floatval($req['longitude'] ?? 121.7512) ?>
+                      )">View</button>
+                    </td>
+                  </tr>
+                  <?php endforeach; ?>
+                <?php endif; ?>
               </tbody>
             </table>
           </div>
 
           <!-- Empty State (Shows when search has no matches) -->
-          <div class="table-empty-state" id="tableEmptyState">
+          <div class="table-empty-state" id="tableEmptyState" style="display: none;">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="11" cy="11" r="8"></circle>
               <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
@@ -289,13 +323,11 @@
           <!-- Table Footer -->
           <div class="table-footer">
             <div class="table-pagination-info" id="paginationInfo">
-              Showing 1 to 6 of 18 entries
+              Showing 1 to <?= count($requests) ?> of <?= count($requests) ?> entries
             </div>
             <div class="table-pagination-controls">
               <button type="button" class="pagination-btn" disabled>&larr; Previous</button>
               <button type="button" class="pagination-btn" style="background: var(--admin-purple); color: #ffffff; border-color: var(--admin-purple);">1</button>
-              <button type="button" class="pagination-btn">2</button>
-              <button type="button" class="pagination-btn">3</button>
               <button type="button" class="pagination-btn">Next &rarr;</button>
             </div>
           </div>
@@ -319,30 +351,30 @@
     <div style="padding: var(--space-6); display: flex; flex-direction: column; gap: var(--space-4); font-size: var(--fs-sm); max-height: 75vh; overflow-y: auto;">
       <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--admin-border-subtle); padding-bottom: var(--space-2);">
         <span style="color: var(--admin-muted);">Name:</span>
-        <strong id="modalRequesterName" style="color: var(--admin-text);">Kriz Bonifacio</strong>
+        <strong id="modalRequesterName" style="color: var(--admin-text);">--</strong>
       </div>
       <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--admin-border-subtle); padding-bottom: var(--space-2);">
         <span style="color: var(--admin-muted);">Student ID:</span>
-        <span id="modalStudentId" style="font-family: monospace; font-weight: 600;">24-00909</span>
+        <span id="modalStudentId" style="font-family: monospace; font-weight: 600;">--</span>
       </div>
       <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--admin-border-subtle); padding-bottom: var(--space-2);">
         <span style="color: var(--admin-muted);">Contact Number:</span>
-        <strong id="modalContactNumber" style="font-family: monospace; color: var(--admin-text);">0917 890 1234</strong>
+        <strong id="modalContactNumber" style="font-family: monospace; color: var(--admin-text);">--</strong>
       </div>
       <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--admin-border-subtle); padding-bottom: var(--space-2);">
         <span style="color: var(--admin-muted);">Email Address:</span>
-        <span id="modalEmailAddress" style="color: var(--admin-text);">kriz@gmail.com</span>
+        <span id="modalEmailAddress" style="color: var(--admin-text);">--</span>
       </div>
       <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--admin-border-subtle); padding-bottom: var(--space-2);">
         <span style="color: var(--admin-muted);">Assistance Needed:</span>
-        <strong id="modalAssistanceType" style="color: var(--admin-purple-mid);">Food, Water Packs</strong>
+        <strong id="modalAssistanceType" style="color: var(--admin-purple-mid);">--</strong>
       </div>
       
       <!-- Incident Location with Interactive Minimap Button -->
       <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--admin-border-subtle); padding-bottom: var(--space-2); flex-wrap: wrap; gap: 6px;">
         <span style="color: var(--admin-muted);">Location & Landmark:</span>
         <div style="display: flex; align-items: center; gap: 8px;">
-          <strong id="modalLocation" style="color: var(--admin-text);">Carig Sur (Near Barangay Hall)</strong>
+          <strong id="modalLocation" style="color: var(--admin-text);">--</strong>
           <button type="button" class="table-action-btn" id="toggleRequestMinimapBtn" onclick="toggleRequestMinimap()" style="padding: 2px 8px; font-size: 0.72rem; color: #352264; border-color: rgba(53, 34, 100, 0.25); background: #f6f3fc; display: inline-flex; align-items: center; gap: 4px;">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon>
@@ -357,7 +389,7 @@
       <!-- Collapsible Request Incident Minimap -->
       <div id="requestMinimapCard" style="display: none; background: #faf8fc; border: 1.5px solid rgba(53, 34, 100, 0.15); border-radius: var(--radius-md); padding: var(--space-3); margin-top: -2px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: var(--fs-2xs);">
-          <span style="font-weight: 700; color: #352264;" id="requestMinimapCoordsLabel">📍 17.6542° N, 121.7513° E (Carig Sur)</span>
+          <span style="font-weight: 700; color: #352264;" id="requestMinimapCoordsLabel">📍 17.6534° N, 121.7512° E</span>
           <span style="color: var(--admin-muted);">Emergency Pin Location</span>
         </div>
         <div id="adminRequestMinimap" style="height: 180px; width: 100%; border-radius: 8px; border: 1px solid rgba(0,0,0,0.1); z-index: 1;"></div>
@@ -370,7 +402,7 @@
       <div>
         <span style="color: var(--admin-muted); display: block; margin-bottom: 4px;">Incident Notes & Description:</span>
         <div id="modalDescription" style="background: var(--admin-bg); padding: var(--space-3); border-radius: var(--radius-sm); color: var(--admin-text-secondary); line-height: 1.5;">
-          Family of 4 stranded due to floodwaters reaching knee level.
+          --
         </div>
       </div>
     </div>
@@ -385,9 +417,9 @@
   <script>
     let reqMinimap = null;
     let reqMarker = null;
-    let reqLat = 17.6542;
-    let reqLng = 121.7513;
-    let currentRequestId = '';
+    let reqLat = 17.6534;
+    let reqLng = 121.7512;
+    let currentDatabaseId = null;
     let currentRequestStatus = '';
 
     function closeRequestModal() {
@@ -399,31 +431,36 @@
       if (btnText) btnText.textContent = 'View Minimap';
     }
 
-    // Dynamic Action Buttons Generator based on Status
+    // Dynamic Action Buttons Generator with archive & restore support
     function renderModalActions(status) {
       const footerEl = document.getElementById('requestModalFooterActions');
       if (!footerEl) return;
       const statusLower = (status || '').toLowerCase().trim();
 
-      if (statusLower === 'pending' || statusLower === 'pending request') {
+      if (statusLower === 'pending') {
         footerEl.innerHTML = `
           <button type="button" class="table-action-btn" onclick="closeRequestModal()">Cancel</button>
-          <button type="button" class="table-action-btn btn-filled" onclick="handleApproveRequest()">Approve</button>
+          <button type="button" class="table-action-btn btn-filled" style="background: #4f46e5; color: #ffffff;" onclick="sendStatusUpdateToServer('approved', 'Request approved successfully.')">Approve</button>
         `;
       } else if (statusLower === 'approved') {
         footerEl.innerHTML = `
           <button type="button" class="table-action-btn" onclick="closeRequestModal()">Cancel</button>
-          <button type="button" class="table-action-btn btn-filled" onclick="handleAssignReliefAid()">Assign Relief Aid</button>
+          <button type="button" class="table-action-btn btn-filled" style="background: #4f46e5; color: #ffffff;" onclick="sendStatusUpdateToServer('in_progress', 'Relief aid assigned and marked In Progress.')">Assign Relief Aid</button>
         `;
-      } else if (statusLower === 'in progress') {
+      } else if (statusLower === 'in progress' || statusLower === 'in_progress') {
         footerEl.innerHTML = `
           <button type="button" class="table-action-btn" onclick="closeRequestModal()">Cancel</button>
-          <button type="button" class="table-action-btn btn-filled" onclick="handleCompleteRequest()">Complete</button>
+          <button type="button" class="table-action-btn btn-filled" style="background: #4f46e5; color: #ffffff;" onclick="sendStatusUpdateToServer('completed', 'Request marked as completed and delivered.')">Complete</button>
         `;
       } else if (statusLower === 'completed') {
         footerEl.innerHTML = `
           <button type="button" class="table-action-btn" onclick="closeRequestModal()">Close</button>
-          <button type="button" class="table-action-btn btn-filled" onclick="handleArchiveRequest()">Archive</button>
+          <button type="button" class="table-action-btn btn-filled" style="background: #4f46e5; color: #ffffff;" onclick="sendStatusUpdateToServer('archived', 'Request archived successfully.')">Archive</button>
+        `;
+      } else if (statusLower === 'archived') {
+        footerEl.innerHTML = `
+          <button type="button" class="table-action-btn" onclick="closeRequestModal()">Close</button>
+          <button type="button" class="table-action-btn btn-filled" style="background: #4f46e5; color: #ffffff;" onclick="sendStatusUpdateToServer('completed', 'Request restored to completed.')">Restore to Completed</button>
         `;
       } else {
         footerEl.innerHTML = `
@@ -433,58 +470,35 @@
     }
 
     // Modal Handler
-    function openRequestModal(id, requester, studentId, contact, email, assistance, location, status, submitted, desc, lat, lng) {
-      currentRequestId = id;
-      
-      let contactVal = contact;
-      let emailVal = email;
-      let assistVal = assistance;
-      let locVal = location;
-      let statVal = status;
-      let subVal = submitted;
-      let descVal = desc;
-      let latVal = lat;
-      let lngVal = lng;
+    function openRequestModal(code, requester, studentId, contact, email, assistance, location, status, desc, dbId, lat, lng) {
+      currentDatabaseId = dbId;
+      currentRequestStatus = status;
+      reqLat = lat || 17.6534;
+      reqLng = lng || 121.7512;
 
-      // Handle fallback if contact/email are omitted
-      if (typeof contact === 'string' && (contact.includes('Food') || contact.includes('First Aid') || contact.includes('Relief') || contact.includes('Shelter') || contact.includes('Kit'))) {
-        lngVal = desc;
-        latVal = submitted;
-        descVal = status;
-        subVal = location;
-        statVal = assistance;
-        locVal = email;
-        assistVal = contact;
-        contactVal = '0917 890 1234';
-        emailVal = 'kriz@gmail.com';
-      }
-
-      currentRequestStatus = statVal;
-      reqLat = latVal || 17.6542;
-      reqLng = lngVal || 121.7513;
-
-      document.getElementById('modalRequestId').textContent = id;
+      document.getElementById('modalRequestId').textContent = code;
       document.getElementById('modalRequesterName').textContent = requester;
       document.getElementById('modalStudentId').textContent = studentId;
-      document.getElementById('modalContactNumber').textContent = contactVal || '0917 890 1234';
-      document.getElementById('modalEmailAddress').textContent = emailVal || 'kriz@gmail.com';
-      document.getElementById('modalAssistanceType').textContent = assistVal;
-      document.getElementById('modalLocation').textContent = locVal;
-      document.getElementById('modalDescription').textContent = descVal;
+      document.getElementById('modalContactNumber').textContent = contact || 'N/A';
+      document.getElementById('modalEmailAddress').textContent = email || 'N/A';
+      document.getElementById('modalAssistanceType').textContent = assistance;
+      document.getElementById('modalLocation').textContent = location;
+      document.getElementById('modalDescription').textContent = desc;
 
       const coordsEl = document.getElementById('requestMinimapCoordsLabel');
-      if (coordsEl) coordsEl.textContent = `📍 ${reqLat.toFixed(4)}° N, ${reqLng.toFixed(4)}° E (${locVal})`;
+      if (coordsEl) coordsEl.textContent = `📍 ${reqLat.toFixed(4)}° N, ${reqLng.toFixed(4)}° E (${location})`;
 
       const badgeEl = document.getElementById('modalStatusBadge');
       let pillClass = 'pending';
-      const statusLower = (statVal || '').toLowerCase().trim();
+      const statusLower = (status || '').toLowerCase().trim();
       if (statusLower === 'completed') pillClass = 'completed';
       else if (statusLower === 'approved') pillClass = 'approved';
-      else if (statusLower === 'in progress') pillClass = 'in-progress';
-      badgeEl.innerHTML = `<span class="status-pill ${pillClass}">${statVal}</span>`;
+      else if (statusLower === 'in progress' || statusLower === 'in_progress') pillClass = 'in-progress';
+      else if (statusLower === 'archived') pillClass = 'archived';
+      
+      badgeEl.innerHTML = `<span class="status-pill ${pillClass}">${status}</span>`;
 
-      // Render the status-specific action buttons
-      renderModalActions(statVal);
+      renderModalActions(status);
 
       // Hide minimap by default on open
       const minimapCard = document.getElementById('requestMinimapCard');
@@ -496,65 +510,29 @@
       if (modal) modal.showModal();
     }
 
-    // Status Transition Action Handlers
-    function updateRowStatusInTable(reqId, newStatus) {
-      const rows = document.querySelectorAll('#requestsTableBody tr');
-      const pillClass = newStatus.toLowerCase().replace(/\s+/g, '-');
-      
-      rows.forEach(row => {
-        const idBadge = row.querySelector('.table-id-badge');
-        if (idBadge && idBadge.textContent.trim() === reqId) {
-          row.setAttribute('data-status', newStatus.toLowerCase());
-          const statusCell = row.children[4];
-          if (statusCell) {
-            statusCell.innerHTML = `<span class="status-pill ${pillClass}">${newStatus}</span>`;
-          }
-          const actionBtn = row.querySelector('.table-action-btn');
-          if (actionBtn) {
-            const currentOnclick = actionBtn.getAttribute('onclick') || '';
-            const updatedOnclick = currentOnclick.replace(/'(Pending|Approved|In Progress|Completed)'/i, `'${newStatus}'`);
-            actionBtn.textContent = 'View';
-            actionBtn.className = 'table-action-btn';
-          }
-        }
-      });
-    }
+    // Reliable Direct Form Submission Handler for Status Updates
+    function sendStatusUpdateToServer(newStatus, successMessage) {
+      if (!currentDatabaseId) return;
 
-    function handleApproveRequest() {
-      currentRequestStatus = 'Approved';
-      const badgeEl = document.getElementById('modalStatusBadge');
-      if (badgeEl) badgeEl.innerHTML = '<span class="status-pill approved">Approved</span>';
-      renderModalActions('Approved');
-      updateRowStatusInTable(currentRequestId, 'Approved');
-      alert(`Request ${currentRequestId} has been APPROVED.`);
-      closeRequestModal();
-    }
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = 'admin-request.php';
 
-    function handleAssignReliefAid() {
-      currentRequestStatus = 'In Progress';
-      const badgeEl = document.getElementById('modalStatusBadge');
-      if (badgeEl) badgeEl.innerHTML = '<span class="status-pill in-progress">In Progress</span>';
-      renderModalActions('In Progress');
-      updateRowStatusInTable(currentRequestId, 'In Progress');
-      alert(`Relief Aid assigned for ${currentRequestId}. Status updated to IN PROGRESS.`);
-      closeRequestModal();
-    }
+      const idInput = document.createElement('input');
+      idInput.type = 'hidden';
+      idInput.name = 'request_id';
+      idInput.value = currentDatabaseId;
+      form.appendChild(idInput);
 
-    function handleCompleteRequest() {
-      currentRequestStatus = 'Completed';
-      const badgeEl = document.getElementById('modalStatusBadge');
-      if (badgeEl) badgeEl.innerHTML = '<span class="status-pill completed">Completed</span>';
-      renderModalActions('Completed');
-      updateRowStatusInTable(currentRequestId, 'Completed');
-      alert(`Request ${currentRequestId} has been marked as COMPLETED.`);
-      closeRequestModal();
-    }
+      const statusInput = document.createElement('input');
+      statusInput.type = 'hidden';
+      statusInput.name = 'status';
+      statusInput.value = newStatus;
+      form.appendChild(statusInput);
 
-    function handleArchiveRequest() {
-      if (confirm(`Archive assistance request ${currentRequestId}?\n\nThis will move the request to the relief archive registry.`)) {
-        alert(`Request ${currentRequestId} has been successfully ARCHIVED.`);
-        closeRequestModal();
-      }
+      document.body.appendChild(form);
+      alert(successMessage);
+      form.submit();
     }
 
     // Toggle Minimap Inside Request Modal
@@ -625,6 +603,7 @@
       const tableRows = document.querySelectorAll('#requestsTableBody tr');
       const emptyState = document.getElementById('tableEmptyState');
       const paginationInfo = document.getElementById('paginationInfo');
+      const totalEntries = tableRows.length;
 
       function filterTable() {
         const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
@@ -650,7 +629,7 @@
           emptyState.style.display = visibleCount === 0 ? 'block' : 'none';
         }
         if (paginationInfo) {
-          paginationInfo.textContent = `Showing 1 to ${visibleCount} of 18 entries`;
+          paginationInfo.textContent = `Showing 1 to ${visibleCount} of ${totalEntries} entries`;
         }
       }
 

@@ -1,3 +1,109 @@
+<?php
+session_start();
+require_once 'alerto-db.php';
+
+$error = '';
+$success = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $full_name      = trim($_POST['full_name'] ?? '');
+    $student_id     = trim($_POST['student_id'] ?? '');
+    $program        = trim($_POST['program'] ?? '');
+    $year_level     = trim($_POST['year_level'] ?? '');
+    $contact_number = trim($_POST['contact_number'] ?? '');
+    $email          = trim($_POST['email'] ?? '');
+    $password       = $_POST['password'] ?? '';
+    $confirm_pass   = $_POST['confirm_password'] ?? '';
+
+    if (empty($full_name) || empty($student_id) || empty($program) || empty($year_level) || empty($email) || empty($password)) {
+        $error = "Please fill in all required fields.";
+    } elseif (!preg_match('/^\d{2}-\d{5}$/', $student_id)) {
+        $error = "Student ID must be in the exact format XX-XXXXX (e.g., 24-00909).";
+    } elseif ($password !== $confirm_pass) {
+        $error = "Passwords do not match.";
+    } elseif (!isset($_FILES['id_selfie']) || !isset($_FILES['assessment_form'])) {
+        $error = "Please upload both your ID selfie and Certificate of Registration (COR).";
+    } else {
+        $stmt = $pdo->prepare("SELECT id, status FROM users WHERE student_id = ? OR email = ?");
+        $stmt->execute([$student_id, $email]);
+        $existingUser = $stmt->fetch();
+        
+        if ($existingUser) {
+            // Allow resubmission if the previous account was rejected
+            if ($existingUser['status'] === 'rejected') {
+                $target_dir = "uploads/documents/";
+                $id_selfie_name = time() . "_selfie_" . basename($_FILES["id_selfie"]["name"]);
+                $cor_name       = time() . "_cor_" . basename($_FILES["assessment_form"]["name"]);
+
+                $target_selfie = $target_dir . $id_selfie_name;
+                $target_cor    = $target_dir . $cor_name;
+
+                if (move_uploaded_file($_FILES["id_selfie"]["tmp_name"], $target_selfie) && 
+                    move_uploaded_file($_FILES["assessment_form"]["tmp_name"], $target_cor)) {
+                    
+                    $hashed_password = password_hash($password, PASSWORD_BCRYPT);
+
+                    // Update user details and reset status to unverified
+                    $updateUser = $pdo->prepare("
+                        UPDATE users 
+                        SET full_name = ?, program = ?, year_level = ?, contact_number = ?, password = ?, status = 'unverified', created_at = NOW() 
+                        WHERE id = ?
+                    ");
+                    $updateUser->execute([$full_name, $program, $year_level, $contact_number, $hashed_password, $existingUser['id']]);
+
+                    // Update or insert new verification documents
+                    $checkDoc = $pdo->prepare("SELECT id FROM documents WHERE user_id = ?");
+                    $checkDoc->execute([$existingUser['id']]);
+                    if ($checkDoc->fetch()) {
+                        $updateDoc = $pdo->prepare("UPDATE documents SET id_selfie_path = ?, assessment_form_path = ? WHERE user_id = ?");
+                        $updateDoc->execute([$target_selfie, $target_cor, $existingUser['id']]);
+                    } else {
+                        $insertDoc = $pdo->prepare("INSERT INTO documents (user_id, id_selfie_path, assessment_form_path) VALUES (?, ?, ?)");
+                        $insertDoc->execute([$existingUser['id'], $target_selfie, $target_cor]);
+                    }
+
+                    $success = "Resubmission successful! Your updated profile is pending verification.";
+                } else {
+                    $error = "Failed to upload verification documents. Please try again.";
+                }
+            } else {
+                $error = "An account with this Student ID or Email already exists and is active or pending review.";
+            }
+        } else {
+            $target_dir = "uploads/documents/";
+            $id_selfie_name = time() . "_selfie_" . basename($_FILES["id_selfie"]["name"]);
+            $cor_name       = time() . "_cor_" . basename($_FILES["assessment_form"]["name"]);
+
+            $target_selfie = $target_dir . $id_selfie_name;
+            $target_cor    = $target_dir . $cor_name;
+
+            if (move_uploaded_file($_FILES["id_selfie"]["tmp_name"], $target_selfie) && 
+                move_uploaded_file($_FILES["assessment_form"]["tmp_name"], $target_cor)) {
+                
+                $hashed_password = password_hash($password, PASSWORD_BCRYPT);
+
+                $stmtUser = $pdo->prepare("
+                    INSERT INTO users (role, full_name, student_id, program, year_level, contact_number, email, password, status) 
+                    VALUES ('student', ?, ?, ?, ?, ?, ?, ?, 'unverified')
+                ");
+                $stmtUser->execute([$full_name, $student_id, $program, $year_level, $contact_number, $email, $hashed_password]);
+                $user_id = $pdo->lastInsertId();
+
+                $stmtDoc = $pdo->prepare("
+                    INSERT INTO documents (user_id, id_selfie_path, assessment_form_path) 
+                    VALUES (?, ?, ?)
+                ");
+                $stmtDoc->execute([$user_id, $target_selfie, $target_cor]);
+
+                $success = "Registration successful! Your account is pending verification by an administrator.";
+            } else {
+                $error = "Failed to upload verification documents. Please try again.";
+            }
+        }
+    }
+}
+?>
+
 <!DOCTYPE html>
 <html lang="en">
 
@@ -52,7 +158,29 @@
 
       <!-- Registration Form Body -->
       <div class="register-card-body">
-        <form class="auth-form" id="studentRegisterForm" onsubmit="handleStudentRegister(event)">
+
+        <?php if (!empty($error)): ?>
+          <div class="alert-banner alert-error" role="alert" style="display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-radius: var(--radius-sm, 8px); font-size: var(--fs-xs, 0.8125rem); font-weight: 500; background-color: var(--status-rejected-bg, #fdf0f2); color: var(--status-rejected-text, #9c2438); border: 1.5px solid var(--status-rejected-border, #f8c9d1); line-height: 1.45;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 18px; height: 18px; flex-shrink: 0; color: #b82b43; margin-top: 1px;">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="8" x2="12" y2="12"></line>
+              <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+            <div><?= htmlspecialchars($error) ?></div>
+          </div>
+        <?php endif; ?>
+
+        <?php if (!empty($success)): ?>
+          <div class="alert-banner alert-success" role="alert" style="display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-radius: var(--radius-sm, 8px); font-size: var(--fs-xs, 0.8125rem); font-weight: 500; background-color: var(--status-approved-bg, #edf7f0); color: var(--status-approved-text, #1e6b37); border: 1.5px solid var(--status-approved-border, #c2e7cd); line-height: 1.45;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 18px; height: 18px; flex-shrink: 0; color: #238545; margin-top: 1px;">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+              <polyline points="22 4 12 14.01 9 11.01"></polyline>
+            </svg>
+            <div><?= htmlspecialchars($success) ?></div>
+          </div>
+        <?php endif; ?>
+
+        <form class="auth-form" id="studentRegisterForm" action="user-sign-in.php" method="POST" enctype="multipart/form-data">
 
           <!-- 1. Full Name -->
           <div class="form-field-group">
@@ -71,7 +199,7 @@
                   <circle cx="12" cy="7" r="4"></circle>
                 </svg>
               </span>
-              <input type="text" id="studentFullName" class="auth-input" placeholder="e.g. Kriz Bonifacio" required
+              <input type="text" id="studentFullName" name="full_name" class="auth-input" placeholder="e.g. Kriz Bonifacio" required
                 autocomplete="name">
             </div>
           </div>
@@ -95,9 +223,10 @@
                   <line x1="7" y1="16" x2="10" y2="16"></line>
                 </svg>
               </span>
-              <input type="text" id="studentIdNumber" class="auth-input" placeholder="e.g. 24-00909" required
+              <input type="text" id="studentIdNumber" name="student_id" class="auth-input" placeholder="e.g. 24-00909" pattern="\d{2}-\d{5}" maxlength="8" title="Format must be XX-XXXXX (e.g., 24-00909)" required
                 autocomplete="username">
             </div>
+            <small class="input-hint" style="display:block; font-size: var(--fs-2xs, 0.75rem); color: var(--admin-muted, #718096); margin-top: 4px;">Format must be XX-XXXXX (e.g., 24-00909)</small>
           </div>
 
           <!-- 3. Separated Program & Year Level (2-Column Grid) -->
@@ -119,7 +248,7 @@
                     <path d="M6 12v5c3 3 9 3 12 0v-5"></path>
                   </svg>
                 </span>
-                <select id="studentProgram" class="auth-select" required>
+                <select id="studentProgram" name="program" class="auth-select" required>
                   <option value="" disabled selected>Select Program</option>
                   <option value="BS in Civil Engineering">BS in Civil Engineering</option>
                   <option value="BS in Electrical Engineering">BS in Electrical Engineering</option>
@@ -151,7 +280,7 @@
                     </polygon>
                   </svg>
                 </span>
-                <select id="studentYearLevel" class="auth-select" required>
+                <select id="studentYearLevel" name="year_level" class="auth-select" required>
                   <option value="" disabled selected>Select Year</option>
                   <option value="1st Year">1st Year</option>
                   <option value="2nd Year">2nd Year</option>
@@ -182,7 +311,7 @@
                   </path>
                 </svg>
               </span>
-              <input type="tel" id="studentContact" class="auth-input" placeholder="e.g. 0912 345 6789" required
+              <input type="tel" id="studentContact" name="contact_number" class="auth-input" placeholder="e.g. 0912 345 6789" required
                 autocomplete="tel">
             </div>
           </div>
@@ -204,7 +333,7 @@
                   <polyline points="22,6 12,13 2,6"></polyline>
                 </svg>
               </span>
-              <input type="email" id="studentEmail" class="auth-input" placeholder="e.g. kriz.bonifacio@gmail.com"
+              <input type="email" id="studentEmail" name="email" class="auth-input" placeholder="e.g. kriz.bonifacio@gmail.com"
                 required autocomplete="email">
             </div>
           </div>
@@ -219,7 +348,7 @@
                 <span class="form-label-tag">JPG, PNG</span>
               </label>
               <div class="upload-card-box" onclick="document.getElementById('validIdFileInput').click()">
-                <input type="file" id="validIdFileInput" class="hidden-file-input" accept="image/*,.pdf"
+                <input type="file" id="validIdFileInput" name="id_selfie" class="hidden-file-input" accept="image/*,.pdf" required
                   onchange="handleFileSelected(this, 'validIdBadge', 'validIdText')">
                 <div class="upload-card-icon" aria-hidden="true">
                   <!-- ICON PLACEHOLDER: Edit src="icons/camera.svg" below -->
@@ -244,7 +373,7 @@
                 <span class="form-label-tag">PDF, JPG</span>
               </label>
               <div class="upload-card-box" onclick="document.getElementById('assessmentFileInput').click()">
-                <input type="file" id="assessmentFileInput" class="hidden-file-input" accept=".pdf,image/*"
+                <input type="file" id="assessmentFileInput" name="assessment_form" class="hidden-file-input" accept=".pdf,image/*" required
                   onchange="handleFileSelected(this, 'corBadge', 'corText')">
                 <div class="upload-card-icon" aria-hidden="true">
                   <!-- ICON PLACEHOLDER: Edit src="icons/document.svg" below -->
@@ -285,7 +414,7 @@
                     <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
                   </svg>
                 </span>
-                <input type="password" id="studentPassword" class="auth-input has-eye" placeholder="Create password"
+                <input type="password" id="studentPassword" name="password" class="auth-input has-eye" placeholder="Create password"
                   required autocomplete="new-password">
                 <button type="button" class="password-eye-toggle-btn" aria-label="Show password" onclick="togglePasswordEye(this, 'studentPassword')">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -311,7 +440,7 @@
                     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
                   </svg>
                 </span>
-                <input type="password" id="studentRepeatPassword" class="auth-input has-eye"
+                <input type="password" id="studentRepeatPassword" name="confirm_password" class="auth-input has-eye"
                   placeholder="Confirm password" required autocomplete="new-password">
                 <button type="button" class="password-eye-toggle-btn" aria-label="Show password" onclick="togglePasswordEye(this, 'studentRepeatPassword')">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -366,7 +495,7 @@
             <span>CSU-COEA Student Verification & Relief Coordination Standard</span>
           </div>
 
-          <a href="user-login.html" class="auth-back-link">
+          <a href="user-login.php" class="auth-back-link">
             <span>Already registered? <strong>Sign In to Student Portal &rarr;</strong></span>
           </a>
         </div>
@@ -409,35 +538,6 @@
       document.getElementById('studentEmail').value = 'kriz@gmail.com';
       document.getElementById('studentPassword').value = 'studentPass2026';
       document.getElementById('studentRepeatPassword').value = 'studentPass2026';
-      document.getElementById('validIdText').textContent = 'csu_id_selfie.png';
-      document.getElementById('validIdBadge').style.display = 'inline-block';
-      document.getElementById('corText').textContent = 'cor_assessment_2026.pdf';
-      document.getElementById('corBadge').style.display = 'inline-block';
-    }
-
-    // Handle Student Registration Submission
-    function handleStudentRegister(event) {
-      event.preventDefault();
-      const pwd = document.getElementById('studentPassword').value;
-      const repeatPwd = document.getElementById('studentRepeatPassword').value;
-
-      if (pwd !== repeatPwd) {
-        alert('Passwords do not match. Please ensure both password fields are identical.');
-        return;
-      }
-
-      const submitBtn = document.getElementById('studentRegSubmitBtn');
-      submitBtn.innerHTML = '<span>Submitting Profile for Verification...</span>';
-      submitBtn.style.opacity = '0.85';
-      submitBtn.disabled = true;
-
-      setTimeout(() => {
-        submitBtn.innerHTML = '<span>Profile Submitted! Redirecting to Sign In...</span>';
-        submitBtn.style.background = 'linear-gradient(135deg, #1e6b37, #238545)';
-        setTimeout(() => {
-          window.location.href = 'user-login.html';
-        }, 700);
-      }, 700);
     }
   </script>
 </body>

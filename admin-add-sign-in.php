@@ -1,10 +1,56 @@
+<?php
+session_start();
+require_once 'alerto-db.php';
+
+if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'superadmin') {
+    header("Location: admin-login.php");
+    exit;
+}
+
+$error = '';
+$success = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $full_name      = trim($_POST['full_name'] ?? '');
+    $student_id     = trim($_POST['student_id'] ?? '');
+    $program        = trim($_POST['program'] ?? '');
+    $year_level     = trim($_POST['year_level'] ?? '');
+    $contact_number = trim($_POST['contact_number'] ?? '');
+    $email          = trim($_POST['email'] ?? '');
+    $password       = $_POST['password'] ?? '';
+    $confirm        = $_POST['confirm_password'] ?? '';
+
+    if (empty($full_name) || empty($student_id) || empty($program) || empty($year_level) || empty($contact_number) || empty($email) || empty($password)) {
+        $error = "Please fill in all required fields.";
+    } elseif (!preg_match('/^\d{2}-\d{5}$/', $student_id)) {
+        $error = "Student ID must be in the exact format XX-XXXXX (e.g., 24-00909).";
+    } elseif ($password !== $confirm) {
+        $error = "Passwords do not match.";
+    } else {
+        $stmt = $pdo->prepare("SELECT id FROM users WHERE student_id = ? OR email = ?");
+        $stmt->execute([$student_id, $email]);
+
+        if ($stmt->fetch()) {
+            $error = "An account with this Student ID or Email already exists.";
+        } else {
+            $hashed = password_hash($password, PASSWORD_BCRYPT);
+            $stmtIns = $pdo->prepare("
+                INSERT INTO users (role, full_name, student_id, program, year_level, contact_number, email, password, status)
+                VALUES ('admin', ?, ?, ?, ?, ?, ?, ?, 'verified')
+            ");
+            $stmtIns->execute([$full_name, $student_id, $program, $year_level, $contact_number, $email, $hashed]);
+            $success = "Admin account for " . htmlspecialchars($full_name) . " has been created successfully.";
+        }
+    }
+}
+?>
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Admin Profile Registration | ALERTO - CSU-Carig Student Council</title>
+  <title>Add New Admin | ALERTO - CSU-Carig Student Council</title>
 
   <!-- Google Fonts: Poppins & Inter -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -44,7 +90,7 @@
             <span class="auth-logo-fallback" style="display: none;">A</span>
           </div>
           <div class="auth-text-meta">
-            <h1>Create Admin Profile</h1>
+            <h1>Create New Admin Profile</h1>
             <p>COEA-SC DRRM Community Head</p>
           </div>
         </div>
@@ -52,7 +98,54 @@
 
       <!-- Registration Form Body -->
       <div class="register-card-body">
-        <form class="auth-form" id="adminRegisterForm" onsubmit="handleAdminRegister(event)">
+
+        <!-- PHP Error / Success Messages -->
+        <?php if (!empty($error)): ?>
+        <div role="alert" style="
+          margin-bottom: 18px;
+          padding: 12px 16px;
+          background: rgba(220,38,38,0.1);
+          border: 1px solid rgba(220,38,38,0.35);
+          border-radius: 10px;
+          color: #dc2626;
+          font-size: 0.875rem;
+          font-weight: 500;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        ">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+          <?php echo htmlspecialchars($error); ?>
+        </div>
+        <?php endif; ?>
+
+        <?php if (!empty($success)): ?>
+        <div role="status" style="
+          margin-bottom: 18px;
+          padding: 12px 16px;
+          background: rgba(22,163,74,0.1);
+          border: 1px solid rgba(22,163,74,0.35);
+          border-radius: 10px;
+          color: #16a34a;
+          font-size: 0.875rem;
+          font-weight: 500;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        ">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+          </svg>
+          <?php echo htmlspecialchars($success); ?>
+        </div>
+        <?php endif; ?>
+
+        <form class="auth-form" id="adminRegisterForm" method="POST" action="admin-add-sign-in.php">
 
           <!-- 1. Full Name -->
           <div class="form-field-group">
@@ -71,8 +164,9 @@
                   <circle cx="12" cy="7" r="4"></circle>
                 </svg>
               </span>
-              <input type="text" id="regFullName" class="auth-input" placeholder="e.g. Kriz Bonifacio" required
-                autocomplete="name">
+              <input type="text" id="regFullName" name="full_name" class="auth-input"
+                placeholder="e.g. Kriz Bonifacio" required autocomplete="name"
+                value="<?php echo htmlspecialchars($_POST['full_name'] ?? ''); ?>">
             </div>
           </div>
 
@@ -95,8 +189,11 @@
                   <line x1="7" y1="16" x2="10" y2="16"></line>
                 </svg>
               </span>
-              <input type="text" id="regStudentId" class="auth-input" placeholder="e.g. 24-00909" required
-                autocomplete="username">
+              <input type="text" id="regStudentId" name="student_id" class="auth-input"
+                placeholder="e.g. 24-00909" required autocomplete="username"
+                pattern="\d{2}-\d{5}" maxlength="8"
+                title="Format must be XX-XXXXX (e.g., 24-00909)"
+                value="<?php echo htmlspecialchars($_POST['student_id'] ?? ''); ?>">
             </div>
           </div>
 
@@ -119,17 +216,16 @@
                     <path d="M6 12v5c3 3 9 3 12 0v-5"></path>
                   </svg>
                 </span>
-                <select id="regProgram" class="auth-select" required>
-                  <option value="" disabled selected>Select Program</option>
-                  <option value="BS in Civil Engineering">BS in Civil Engineering</option>
-                  <option value="BS in Electrical Engineering">BS in Electrical Engineering</option>
-                  <option value="BS in Geodetic Engineering">BS in Geodetic Engineering</option>
-                  <option value="BS in Computer Engineering">BS in Computer Engineering</option>
-                  <option value="BS in Chemical Engineering">BS in Chemical Engineering</option>
-                  <option value="BS in Architecture">BS in Architecture</option>
-                  <option value="BS in Electronics Engineering">BS in Electronics Engineering</option>
-                  <option value="BS in Agricultural and Biosystems Engineering">BS in Agricultural and Biosystems
-                    Engineering</option>
+                <select id="regProgram" name="program" class="auth-select" required>
+                  <option value="" disabled <?php echo empty($_POST['program']) ? 'selected' : ''; ?>>Select Program</option>
+                  <option value="BS in Civil Engineering" <?php echo (($_POST['program'] ?? '') === 'BS in Civil Engineering') ? 'selected' : ''; ?>>BS in Civil Engineering</option>
+                  <option value="BS in Electrical Engineering" <?php echo (($_POST['program'] ?? '') === 'BS in Electrical Engineering') ? 'selected' : ''; ?>>BS in Electrical Engineering</option>
+                  <option value="BS in Geodetic Engineering" <?php echo (($_POST['program'] ?? '') === 'BS in Geodetic Engineering') ? 'selected' : ''; ?>>BS in Geodetic Engineering</option>
+                  <option value="BS in Computer Engineering" <?php echo (($_POST['program'] ?? '') === 'BS in Computer Engineering') ? 'selected' : ''; ?>>BS in Computer Engineering</option>
+                  <option value="BS in Chemical Engineering" <?php echo (($_POST['program'] ?? '') === 'BS in Chemical Engineering') ? 'selected' : ''; ?>>BS in Chemical Engineering</option>
+                  <option value="BS in Architecture" <?php echo (($_POST['program'] ?? '') === 'BS in Architecture') ? 'selected' : ''; ?>>BS in Architecture</option>
+                  <option value="BS in Electronics Engineering" <?php echo (($_POST['program'] ?? '') === 'BS in Electronics Engineering') ? 'selected' : ''; ?>>BS in Electronics Engineering</option>
+                  <option value="BS in Agricultural and Biosystems Engineering" <?php echo (($_POST['program'] ?? '') === 'BS in Agricultural and Biosystems Engineering') ? 'selected' : ''; ?>>BS in Agricultural and Biosystems Engineering</option>
                 </select>
               </div>
             </div>
@@ -151,17 +247,34 @@
                     </polygon>
                   </svg>
                 </span>
-                <select id="regYearLevel" class="auth-select" required>
-                  <option value="" disabled selected>Select Year</option>
-                  <option value="1st Year">1st Year</option>
-                  <option value="2nd Year">2nd Year</option>
-                  <option value="3rd Year">3rd Year</option>
-                  <option value="4th Year">4th Year</option>
-                  <option value="5th Year">5th Year</option>
+                <select id="regYearLevel" name="year_level" class="auth-select" required>
+                  <option value="" disabled <?php echo empty($_POST['year_level']) ? 'selected' : ''; ?>>Select Year</option>
+                  <option value="1st Year" <?php echo (($_POST['year_level'] ?? '') === '1st Year') ? 'selected' : ''; ?>>1st Year</option>
+                  <option value="2nd Year" <?php echo (($_POST['year_level'] ?? '') === '2nd Year') ? 'selected' : ''; ?>>2nd Year</option>
+                  <option value="3rd Year" <?php echo (($_POST['year_level'] ?? '') === '3rd Year') ? 'selected' : ''; ?>>3rd Year</option>
+                  <option value="4th Year" <?php echo (($_POST['year_level'] ?? '') === '4th Year') ? 'selected' : ''; ?>>4th Year</option>
+                  <option value="5th Year" <?php echo (($_POST['year_level'] ?? '') === '5th Year') ? 'selected' : ''; ?>>5th Year</option>
                 </select>
               </div>
             </div>
 
+          </div>
+
+          <!-- Contact Number -->
+          <div class="form-field-group">
+            <label for="adminContact" class="form-label">
+              <span>Contact Number</span>
+              <span class="form-label-tag">Mobile / Phone</span>
+            </label>
+            <div class="input-with-icon">
+              <span class="input-icon-slot" aria-hidden="true">
+                <img src="icons/phone.svg" alt="" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;">
+                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
+                </svg>
+              </span>
+              <input type="tel" id="adminContact" name="contact_number" class="auth-input" placeholder="e.g. 0912 345 6789" required autocomplete="tel">
+            </div>
           </div>
 
           <!-- 4. Institutional Email -->
@@ -181,8 +294,9 @@
                   <polyline points="22,6 12,13 2,6"></polyline>
                 </svg>
               </span>
-              <input type="email" id="regEmail" class="auth-input" placeholder="e.g. kriz@gmail.com" required
-                autocomplete="email">
+              <input type="email" id="regEmail" name="email" class="auth-input"
+                placeholder="e.g. kriz@gmail.com" required autocomplete="email"
+                value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>">
             </div>
           </div>
 
@@ -205,8 +319,8 @@
                     <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
                   </svg>
                 </span>
-                <input type="password" id="regPassword" class="auth-input has-eye" placeholder="Create password"
-                  required autocomplete="new-password">
+                <input type="password" id="regPassword" name="password" class="auth-input has-eye"
+                  placeholder="Create password" required autocomplete="new-password">
                 <button type="button" class="password-eye-toggle-btn" aria-label="Show password" onclick="togglePasswordEye(this, 'regPassword')">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
@@ -231,7 +345,7 @@
                     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
                   </svg>
                 </span>
-                <input type="password" id="regRepeatPassword" class="auth-input has-eye"
+                <input type="password" id="regRepeatPassword" name="confirm_password" class="auth-input has-eye"
                   placeholder="Confirm password" required autocomplete="new-password">
                 <button type="button" class="password-eye-toggle-btn" aria-label="Show password" onclick="togglePasswordEye(this, 'regRepeatPassword')">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -260,7 +374,7 @@
 
           <!-- Submit Button -->
           <button type="submit" class="auth-submit-btn" id="regSubmitBtn">
-            <span>Sign in</span>
+            <span>Create Admin Account</span>
             <!-- ICON PLACEHOLDER: Edit src="icons/arrow-right.svg" below -->
             <img src="icons/arrow-right.svg" alt="" style="width:16px;height:16px;"
               onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-block';">
@@ -286,8 +400,8 @@
             <span>COEA-SC DRRM Operations Security Standard</span>
           </div>
 
-          <a href="admin-login.html" class="auth-back-link">
-            <span>Already have an admin account? <strong>Sign In to Admin Portal &rarr;</strong></span>
+          <a href="admin-login.php" class="auth-back-link">
+            <span>Back to Admin Portal &rarr;</span>
           </a>
         </div>
 
@@ -319,31 +433,6 @@
       document.getElementById('regEmail').value = 'kriz@gmail.com';
       document.getElementById('regPassword').value = 'alertoDRRM2026';
       document.getElementById('regRepeatPassword').value = 'alertoDRRM2026';
-    }
-
-    // Handle Registration Submission
-    function handleAdminRegister(event) {
-      event.preventDefault();
-      const pwd = document.getElementById('regPassword').value;
-      const repeatPwd = document.getElementById('regRepeatPassword').value;
-
-      if (pwd !== repeatPwd) {
-        alert('Passwords do not match. Please ensure both password fields are identical.');
-        return;
-      }
-
-      const submitBtn = document.getElementById('regSubmitBtn');
-      submitBtn.innerHTML = '<span>Creating DRRM Admin Profile...</span>';
-      submitBtn.style.opacity = '0.85';
-      submitBtn.disabled = true;
-
-      setTimeout(() => {
-        submitBtn.innerHTML = '<span>Profile Registered! Redirecting to Sign In...</span>';
-        submitBtn.style.background = 'linear-gradient(135deg, #1e6b37, #238545)';
-        setTimeout(() => {
-          window.location.href = 'admin-login.html';
-        }, 700);
-      }, 700);
     }
   </script>
 </body>

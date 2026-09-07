@@ -5,7 +5,7 @@
 
 /* --------------------------------------------------------------------------
    1. Admin Layout Structure
-   -------------------------------------------------------------------------- */
+  -------------------------------------------------------------------------- */
 .admin-layout {
   display: flex;
   min-height: 100vh;
@@ -14,7 +14,7 @@
 
 /* --------------------------------------------------------------------------
    2. Dark Violet Admin Sidebar
-   -------------------------------------------------------------------------- */
+  -------------------------------------------------------------------------- */
 .admin-sidebar {
   width: 270px;
   background-color: var(--admin-purple-dark);
@@ -37,6 +37,7 @@
     transition: left var(--transition-smooth);
     box-shadow: 10px 0 30px rgba(0, 0, 0, 0.35);
   }
+
   .admin-sidebar.sidebar-open {
     left: 0;
   }
@@ -119,6 +120,7 @@
   flex-grow: 1;
 }
 
+.nav-item,
 .nav-item-link {
   display: flex;
   align-items: center;
@@ -132,12 +134,14 @@
   text-decoration: none;
 }
 
+.nav-item:hover,
 .nav-item-link:hover {
   background-color: rgba(255, 255, 255, 0.08);
   color: #ffffff;
   transform: translateX(3px);
 }
 
+.nav-item.active,
 .nav-item-link.active {
   background: linear-gradient(135deg, var(--admin-purple), var(--admin-purple-bright));
   color: #ffffff;
@@ -241,9 +245,34 @@
   color: #ffffff;
 }
 
+/* Sidebar Logout Link Styling */
+.sidebar-logout-link {
+  color: #ff6b6b !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-decoration: none;
+  padding: 6px 0;
+  transition: all var(--transition-fast);
+}
+
+.sidebar-logout-link:hover {
+  color: #ff5252 !important;
+  transform: translateX(3px);
+}
+
+.sidebar-logout-link svg {
+  width: 16px !important;
+  height: 16px !important;
+  flex-shrink: 0;
+  stroke: currentColor;
+}
+
 /* --------------------------------------------------------------------------
    3. Main Content Area
-   -------------------------------------------------------------------------- */
+  -------------------------------------------------------------------------- */
 .admin-main-content {
   flex-grow: 1;
   display: flex;
@@ -373,7 +402,7 @@
 
 /* --------------------------------------------------------------------------
    4. Interactive Search & Filters Bar
-   -------------------------------------------------------------------------- */
+  -------------------------------------------------------------------------- */
 .admin-filter-card {
   background: var(--admin-surface);
   border: 1px solid var(--admin-border);
@@ -455,7 +484,7 @@
 
 /* --------------------------------------------------------------------------
    5. Data Table & Management Card
-   -------------------------------------------------------------------------- */
+  -------------------------------------------------------------------------- */
 .data-table-card {
   background: var(--admin-surface);
   border: 1px solid var(--admin-border);
@@ -625,4 +654,34 @@
 .table-empty-state p {
   font-size: var(--fs-xs);
   color: var(--admin-muted);
+}
+
+/* ==========================================================================
+   Clean Professional Status Pill Layout & Alignment Fixes
+   ========================================================================== */
+.status-pill {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 4px 12px !important;
+  border-radius: 50px !important;
+  font-weight: 600;
+  font-size: 0.75rem;
+  letter-spacing: 0.03em;
+  white-space: nowrap !important;
+  line-height: 1.2 !important;
+}
+
+/* Clean unified dot indicator replacing loose text bullet characters */
+.status-pill span,
+.status-pill::before {
+  content: "" !important;
+  display: inline-block !important;
+  width: 6px !important;
+  height: 6px !important;
+  min-width: 6px !important;
+  min-height: 6px !important;
+  border-radius: 50% !important;
+  background-color: currentColor !important;
+  margin: 0 !important;
 }

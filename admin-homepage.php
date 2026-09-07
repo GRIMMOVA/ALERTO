@@ -1,3 +1,50 @@
+<?php
+session_start();
+require_once 'alerto-db.php';
+
+// Process logout
+if (isset($_GET['action']) && $_GET['action'] === 'logout') {
+    session_unset();
+    session_destroy();
+    header("Location: admin-login.php");
+    exit;
+}
+
+// Session Guard
+if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role'], ['admin', 'superadmin'])) {
+    header("Location: admin-login.php");
+    exit;
+}
+
+// 1. Fetch dynamic counts for Student Verifications
+$stmtPendingVerify = $pdo->query("SELECT COUNT(*) FROM users WHERE role = 'student' AND (status = 'pending' || status = 'unverified')");
+$pendingVerifyCount = $stmtPendingVerify->fetchColumn();
+
+$stmtApprovedVerify = $pdo->query("SELECT COUNT(*) FROM users WHERE role = 'student' AND (status = 'approved' || status = 'verified')");
+$approvedVerifyCount = $stmtApprovedVerify->fetchColumn();
+
+$stmtRejectedVerify = $pdo->query("SELECT COUNT(*) FROM users WHERE role = 'student' AND status = 'rejected'");
+$rejectedVerifyCount = $stmtRejectedVerify->fetchColumn();
+
+$stmtBannedVerify = $pdo->query("SELECT COUNT(*) FROM users WHERE role = 'student' AND status = 'banned'");
+$bannedVerifyCount = $stmtBannedVerify->fetchColumn();
+
+// 2. Fetch dynamic counts for Assistance Requests (matching active/status filters)
+$stmtActiveReq = $pdo->query("SELECT COUNT(*) FROM assistance_requests WHERE LOWER(status) IN ('pending', 'approved', 'in_progress', 'in progress')");
+$activeRequestsCount = $stmtActiveReq->fetchColumn();
+
+$stmtPendingReq = $pdo->query("SELECT COUNT(*) FROM assistance_requests WHERE LOWER(status) = 'pending'");
+$pendingRequestsCount = $stmtPendingReq->fetchColumn();
+
+$stmtApprovedReq = $pdo->query("SELECT COUNT(*) FROM assistance_requests WHERE LOWER(status) = 'approved'");
+$approvedRequestsCount = $stmtApprovedReq->fetchColumn();
+
+$stmtInProgressReq = $pdo->query("SELECT COUNT(*) FROM assistance_requests WHERE LOWER(status) IN ('in_progress', 'in progress')");
+$inProgressRequestsCount = $stmtInProgressReq->fetchColumn();
+
+$stmtCompletedReq = $pdo->query("SELECT COUNT(*) FROM assistance_requests WHERE LOWER(status) = 'completed'");
+$completedRequestsCount = $stmtCompletedReq->fetchColumn();
+?>
 <!DOCTYPE html>
 <html lang="en">
 
@@ -17,6 +64,12 @@
   <link rel="stylesheet" href="assets/css/main.css">
   <link rel="stylesheet" href="assets/css/components.css">
   <link rel="stylesheet" href="assets/css/landing.css">
+  <style>
+    /* Fix In Progress label breaking into two lines */
+    .dashboard-grid .stat-card-title {
+      white-space: nowrap !important;
+    }
+  </style>
 </head>
 
 <body>
@@ -24,7 +77,7 @@
   <!-- Navbar (Brand on Far Left Edge, Nav Links on Far Right Edge) -->
   <header class="navbar">
     <div class="navbar-inner">
-      <a href="admin-homepage.html" class="brand" aria-label="ALERTO Home">
+      <a href="admin-homepage.php" class="brand" aria-label="ALERTO Home">
         <!-- Logo Placeholder Container -->
         <div class="logo-container">
           <img src="logo/csulogo.png" alt="CSU Logo" class="logo-img"
@@ -39,9 +92,13 @@
 
       <!-- Right-Aligned Navigation Links -->
       <nav class="main-nav" id="mainNav" aria-label="Main Navigation">
-        <a href="admin-homepage.html" class="active">Home</a>
-        <a href="admin-verify.html">Verify</a>
-        <a href="admin-request.html">Requests</a>
+        <a href="admin-homepage.php" class="active">Home</a>
+        <a href="admin-verify.php">Verify</a>
+        <a href="admin-request.php">Requests</a>
+        <?php if ($_SESSION['role'] === 'superadmin'): ?>
+        <a href="admin-add-sign-in.php">Add New Admin</a>
+        <?php endif; ?>
+        <a href="?action=logout" class="nav-logout-btn">Logout</a>
       </nav>
 
       <!-- Modern Animated Mobile Hamburger Toggle -->
@@ -56,9 +113,12 @@
   <!-- Frosted Glass Mobile Dropdown Navigation -->
   <div class="mobile-nav-menu" id="mobileNavMenu">
     <ul>
-      <li><a href="admin-homepage.html" class="active">Home</a></li>
-      <li><a href="admin-verify.html">Verify</a></li>
-      <li><a href="admin-request.html">Requests</a></li>
+      <li><a href="admin-homepage.php" class="active">Home</a></li>
+      <li><a href="admin-verify.php">Verify</a></li>
+      <li><a href="admin-request.php">Requests</a></li>
+      <?php if ($_SESSION['role'] === 'superadmin'): ?>
+      <li><a href="admin-add-sign-in.php">Add New Admin</a></li>
+      <?php endif; ?>
     </ul>
   </div>
 
@@ -95,7 +155,7 @@
       <div class="container">
 
         <div class="dashboard-header-block">
-          <span class="dashboard-eyebrow">Operations & Oversight</span>
+          <span class="dashboard-eyebrow">Operations &amp; Oversight</span>
           <h2 class="dashboard-main-title" id="dashboardOverviewHeading">Council Operations Overview</h2>
           <p class="dashboard-main-subtitle">Real-time status breakdown for student profile verifications and active
             relief assistance requests.</p>
@@ -105,9 +165,9 @@
         <div class="dashboard-grid">
 
           <!-- =================================================================
-               BOX 1 (LEFT): Student Profile Verification (Entire Board Clickable)
-               ================================================================= -->
-          <a href="admin-verify.html" class="overview-board-link"
+                BOX 1 (LEFT): Student Profile Verification (Entire Board Clickable)
+                ================================================================= -->
+          <a href="admin-verify.php" class="overview-board-link"
             aria-label="Open Student Profile Verification Management">
             <div class="board-header">
               <div class="board-title-group">
@@ -115,14 +175,14 @@
                   <span>Student Profile Verification</span>
                   <span class="board-arrow-indicator">&#8599;</span>
                 </h3>
-                <p>Manage and verify student identification & accounts</p>
+                <p>Manage and verify student identification &amp; accounts</p>
               </div>
               <span class="status-pill purple">Records</span>
             </div>
 
             <div class="board-cards-stack">
 
-              <!-- TOP: Primary Featured Stat (Pending Requests) -->
+              <!-- TOP: Primary Featured Stat (Pending Review) -->
               <div class="top-featured-row">
                 <div class="inner-stat-card featured-stat">
                   <div class="stat-card-header">
@@ -137,11 +197,11 @@
                           <polyline points="12 6 12 12 16 14"></polyline>
                         </svg>
                       </div>
-                      <span class="stat-card-title">Pending Requests</span>
+                      <span class="stat-card-title">Pending Review</span>
                     </div>
                   </div>
-                  <div class="stat-card-number">14</div>
-                  <div class="stat-card-desc">Waiting for student ID & credentials verification</div>
+                  <div class="stat-card-number"><?= $pendingVerifyCount ?></div>
+                  <div class="stat-card-desc">Waiting for student ID &amp; credentials verification</div>
                 </div>
               </div>
 
@@ -165,7 +225,7 @@
                       <span class="stat-card-title">Approved</span>
                     </div>
                   </div>
-                  <div class="stat-card-number">128</div>
+                  <div class="stat-card-number"><?= $approvedVerifyCount ?></div>
                   <div class="stat-card-desc">Verified active students</div>
                 </div>
 
@@ -187,7 +247,7 @@
                       <span class="stat-card-title">Rejected</span>
                     </div>
                   </div>
-                  <div class="stat-card-number">6</div>
+                  <div class="stat-card-number"><?= $rejectedVerifyCount ?></div>
                   <div class="stat-card-desc">Invalid ID details</div>
                 </div>
 
@@ -208,7 +268,7 @@
                       <span class="stat-card-title">Banned</span>
                     </div>
                   </div>
-                  <div class="stat-card-number">2</div>
+                  <div class="stat-card-number"><?= $bannedVerifyCount ?></div>
                   <div class="stat-card-desc">Restricted access</div>
                 </div>
 
@@ -217,9 +277,9 @@
           </a>
 
           <!-- =================================================================
-               BOX 2 (RIGHT): Assistance Requests (Entire Board Clickable)
-               ================================================================= -->
-          <a href="admin-request.html" class="overview-board-link" aria-label="Open Assistance Requests Management">
+                BOX 2 (RIGHT): Assistance Requests (Entire Board Clickable)
+                ================================================================= -->
+          <a href="admin-request.php" class="overview-board-link" aria-label="Open Assistance Requests Management">
             <div class="board-header">
               <div class="board-title-group">
                 <h3>
@@ -233,10 +293,10 @@
 
             <div class="board-cards-stack">
 
-              <!-- TOP: Primary Featured Stats (Total & Pending) -->
+              <!-- TOP: Primary Featured Stats (Active Requests & Pending Action) -->
               <div class="top-featured-row dual-featured">
 
-                <!-- Total Requests -->
+                <!-- Active Requests -->
                 <div class="inner-stat-card featured-stat">
                   <div class="stat-card-header">
                     <div class="stat-card-label-group">
@@ -251,14 +311,14 @@
                           <line x1="12" y1="17" x2="12" y2="21"></line>
                         </svg>
                       </div>
-                      <span class="stat-card-title">Total Requests</span>
+                      <span class="stat-card-title">Active Requests</span>
                     </div>
                   </div>
-                  <div class="stat-card-number">48</div>
-                  <div class="stat-card-desc">Lifetime recorded relief submissions</div>
+                  <div class="stat-card-number"><?= $activeRequestsCount ?></div>
+                  <div class="stat-card-desc">Currently active relief submissions</div>
                 </div>
 
-                <!-- Pending Requests -->
+                <!-- Pending Requests / Action -->
                 <div class="inner-stat-card featured-stat pending-highlight">
                   <div class="stat-card-header">
                     <div class="stat-card-label-group">
@@ -275,8 +335,8 @@
                       <span class="stat-card-title">Pending Action</span>
                     </div>
                   </div>
-                  <div class="stat-card-number">8</div>
-                  <div class="stat-card-desc">Needs dispatch response & allocation</div>
+                  <div class="stat-card-number"><?= $pendingRequestsCount ?></div>
+                  <div class="stat-card-desc">Needs dispatch response &amp; allocation</div>
                 </div>
 
               </div>
@@ -301,7 +361,7 @@
                       <span class="stat-card-title">Approved</span>
                     </div>
                   </div>
-                  <div class="stat-card-number">24</div>
+                  <div class="stat-card-number"><?= $approvedRequestsCount ?></div>
                   <div class="stat-card-desc">Ready for relief pack dispatch</div>
                 </div>
 
@@ -309,12 +369,12 @@
                 <div class="inner-stat-card">
                   <div class="stat-card-header">
                     <div class="stat-card-label-group">
-                      <!-- Icon Slot Placeholder -->
-                      <div class="stat-icon-slot icon-primary">
+                      <!-- Explicitly styled background/border to guarantee visible highlight -->
+                      <div class="stat-icon-slot icon-primary" style="background: rgba(13, 110, 253, 0.1); border: 1px solid rgba(13, 110, 253, 0.2); color: #0d6efd; display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 8px;">
                         <img src="icons/in-progress.png" alt=""
-                          onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                          onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" style="width: 20px; height: 20px;">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                          stroke-linecap="round" stroke-linejoin="round" style="display: none;">
+                          stroke-linecap="round" stroke-linejoin="round" style="display: none; width: 20px; height: 20px;">
                           <circle cx="12" cy="12" r="10"></circle>
                           <polygon points="10 8 16 12 10 16 10 8"></polygon>
                         </svg>
@@ -322,6 +382,7 @@
                       <span class="stat-card-title">In Progress</span>
                     </div>
                   </div>
+                  <div class="stat-card-number"><?= $inProgressRequestsCount ?></div>
                   <div class="stat-card-desc">Being dispatched</div>
                 </div>
 
@@ -342,7 +403,7 @@
                       <span class="stat-card-title">Completed</span>
                     </div>
                   </div>
-                  <div class="stat-card-number">5</div>
+                  <div class="stat-card-number"><?= $completedRequestsCount ?></div>
                   <div class="stat-card-desc">Aid delivered</div>
                 </div>
 
@@ -416,24 +477,20 @@
                     d="M12 2C6.48 2 2 6.03 2 11c0 2.87 1.48 5.43 3.8 7.04V22l3.75-2.06c.79.22 1.62.34 2.45.34 5.52 0 10-4.03 10-9s-4.48-9-10-9zm1.06 12.15l-2.67-2.85-5.21 2.85 5.73-6.08 2.74 2.85 5.14-2.85-5.73 6.08z" />
                 </svg>
               </a>
-              <!-- Instagram -->
-              <a href="https://instagram.com" target="_blank" rel="noopener noreferrer" class="social-circle-btn"
-                aria-label="Instagram Profile">
-                <svg viewBox="0 0 24 24">
-                  <path
-                    d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" />
-                </svg>
-              </a>
             </div>
           </div>
 
-          <!-- Quick Links Column (Only Home, Student Verifications, Assistance Requests) -->
+          <!-- Quick Links Column -->
           <div class="footer-links-col">
             <h4>Quick Links</h4>
             <ul class="footer-nav-list">
-              <li><a href="admin-homepage.html">Home</a></li>
-              <li><a href="admin-verify.html">Student Verifications</a></li>
-              <li><a href="admin-request.html">Assistance Requests</a></li>
+              <li><a href="admin-homepage.php">Home</a></li>
+              <li><a href="admin-verify.php">Student Verifications</a></li>
+              <li><a href="admin-request.php">Assistance Requests</a></li>
+              <?php if ($_SESSION['role'] === 'superadmin'): ?>
+              <li><a href="admin-add-sign-in.php">Add New Admin</a></li>
+              <?php endif; ?>
+              <li><a href="?action=logout" class="footer-logout-btn">Logout</a></li>
             </ul>
           </div>
 

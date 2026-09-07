@@ -39,9 +39,11 @@
     transition: left var(--transition-smooth);
     box-shadow: 10px 0 30px rgba(0, 0, 0, 0.35);
   }
+
   .student-sidebar.sidebar-open {
     left: 0;
   }
+
   .student-mobile-bar {
     display: flex !important;
     background: #ffffff;
@@ -208,6 +210,31 @@
   text-decoration: underline;
 }
 
+/* Sidebar Logout Link Styling */
+.sidebar-logout-link {
+  color: #ff6b6b !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-decoration: none;
+  padding: 6px 0;
+  transition: all var(--transition-fast);
+}
+
+.sidebar-logout-link:hover {
+  color: #ff5252 !important;
+  transform: translateX(3px);
+}
+
+.sidebar-logout-link svg {
+  width: 16px !important;
+  height: 16px !important;
+  flex-shrink: 0;
+  stroke: currentColor;
+}
+
 /* --------------------------------------------------------------------------
    3. Main Content Container
    -------------------------------------------------------------------------- */
@@ -336,24 +363,29 @@
     padding: var(--space-5) 18px;
     border-radius: 18px;
   }
+
   .gcash-card-inner {
     flex-direction: column;
     align-items: center;
     text-align: center;
     gap: 14px;
   }
+
   .gcash-student-info-col {
     flex-direction: column;
     align-items: center;
     text-align: center;
     gap: 12px;
   }
+
   .gcash-text-meta h2 {
     justify-content: center;
   }
+
   .gcash-sub-meta {
     justify-content: center;
   }
+
   .gcash-status-badge-container {
     align-items: center;
     justify-content: center;
@@ -776,7 +808,7 @@
   background: #ffffff;
   border-radius: var(--radius-xl);
   border: 1.5px solid rgba(112, 13, 35, 0.18);
-  box-shadow: 
+  box-shadow:
     0 24px 64px rgba(92, 9, 29, 0.14),
     0 4px 16px rgba(92, 9, 29, 0.04);
   overflow: hidden;
@@ -798,13 +830,16 @@
     padding: var(--space-4) 14px;
     justify-content: flex-start;
   }
+
   .request-card-container {
     border-radius: 18px;
     margin: 10px 0;
   }
+
   .request-header {
     padding: var(--space-5) 18px;
   }
+
   .request-form-body {
     padding: var(--space-5) 16px;
     gap: var(--space-4);
@@ -1107,5 +1142,3 @@
   transform: translateY(-2px);
   box-shadow: 0 14px 36px rgba(112, 13, 35, 0.38);
 }
-
-

@@ -1,3 +1,61 @@
+<?php
+session_start();
+require_once 'alerto-db.php';
+
+// 1. Process logout first
+if (isset($_GET['action']) && $_GET['action'] === 'logout') {
+    session_unset();
+    session_destroy();
+    header("Location: admin-login.php");
+    exit;
+}
+
+// 2. Protect page with session guard
+if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role'], ['admin', 'superadmin'])) {
+    header("Location: admin-login.php");
+    exit;
+}
+
+// 3. Handle user verification status updates (supports AJAX fetch or regular POST)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_id'], $_POST['status'])) {
+    $target_id = intval($_POST['user_id']);
+    $new_status = $_POST['status'];
+    if (in_array($new_status, ['verified', 'rejected', 'banned'])) {
+        $stmt = $pdo->prepare("UPDATE users SET status = ? WHERE id = ?");
+        $stmt->execute([$new_status, $target_id]);
+        
+        // If requested via AJAX/fetch, exit early with success JSON
+        if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
+            echo json_encode(['success' => true]);
+            exit;
+        }
+        
+        header("Location: admin-verify.php");
+        exit;
+    }
+}
+
+// 4. Fetch all student registration records along with their document paths
+$stmt = $pdo->prepare("
+    SELECT u.id, u.student_id, u.full_name, u.email, u.program, u.year_level, u.status, u.contact_number, u.created_at,
+           d.id_selfie_path, d.assessment_form_path
+    FROM users u
+    LEFT JOIN documents d ON u.id = d.user_id
+    WHERE u.role = 'student' 
+    ORDER BY u.id DESC
+");
+$stmt->execute();
+$students = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Count pending verifications dynamically for header and sidebar badges (matching unverified or pending)
+$stmtPending = $pdo->query("SELECT COUNT(*) FROM users WHERE role = 'student' AND (status = 'unverified' OR status = 'pending')");
+$pendingCount = $stmtPending->fetchColumn();
+
+// Active Requests count for the requests sidebar badge (Pending, Approved, In Progress)
+$stmtActiveCount = $pdo->query("SELECT COUNT(*) FROM assistance_requests WHERE LOWER(status) IN ('pending', 'approved', 'in_progress', 'in progress')");
+$activeRequestsCount = $stmtActiveCount->fetchColumn();
+?>
+
 <!DOCTYPE html>
 <html lang="en">
 
@@ -17,6 +75,33 @@
   <link rel="stylesheet" href="assets/css/main.css">
   <link rel="stylesheet" href="assets/css/components.css">
   <link rel="stylesheet" href="assets/css/admin.css">
+  <style>
+    /* Ensure status pills never break text formatting across lines */
+    .status-pill {
+      white-space: nowrap !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 6px !important;
+      padding: 4px 12px !important;
+      border-radius: 50px !important;
+      font-weight: 600;
+      font-size: 0.75rem;
+      letter-spacing: 0.03em;
+      line-height: 1.2 !important;
+    }
+    .status-pill span, 
+    .status-pill::before {
+      content: "" !important;
+      display: inline-block !important;
+      width: 6px !important;
+      height: 6px !important;
+      min-width: 6px !important;
+      min-height: 6px !important;
+      border-radius: 50% !important;
+      background-color: currentColor !important;
+      margin: 0 !important;
+    }
+  </style>
 </head>
 
 <body>
@@ -32,7 +117,7 @@
     <aside class="admin-sidebar" id="adminSidebar" aria-label="Admin Sidebar Navigation">
 
       <!-- Sidebar Brand -->
-      <a href="admin-homepage.html" class="sidebar-brand">
+      <a href="admin-homepage.php" class="sidebar-brand">
         <div class="sidebar-logo">
           <img src="logo/csulogo.png" alt="CSU Logo"
             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
@@ -46,7 +131,7 @@
 
       <!-- Sidebar Navigation Menu -->
       <nav class="sidebar-nav">
-        <a href="admin-homepage.html" class="nav-item-link">
+        <a href="admin-homepage.php" class="nav-item-link">
           <span class="nav-item-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
               stroke-linejoin="round">
@@ -57,7 +142,7 @@
           <span>Dashboard</span>
         </a>
 
-        <a href="admin-verify.html" class="nav-item-link active">
+        <a href="admin-verify.php" class="nav-item-link active">
           <span class="nav-item-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
               stroke-linejoin="round">
@@ -68,10 +153,10 @@
             </svg>
           </span>
           <span>Verifications</span>
-          <span class="nav-item-badge">14</span>
+          <span class="nav-item-badge"><?= $pendingCount ?></span>
         </a>
 
-        <a href="admin-request.html" class="nav-item-link">
+        <a href="admin-request.php" class="nav-item-link">
           <span class="nav-item-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
               stroke-linejoin="round">
@@ -80,16 +165,37 @@
             </svg>
           </span>
           <span>Requests</span>
-          <span class="nav-item-badge">18</span>
+          <span class="nav-item-badge"><?= $activeRequestsCount ?></span>
         </a>
+
+        <?php if ($_SESSION['role'] === 'superadmin'): ?>
+        <a href="admin-add-sign-in.php" class="nav-item nav-item-link">
+          <span class="nav-item-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+              <circle cx="9" cy="7" r="4"></circle>
+              <line x1="20" y1="8" x2="20" y2="14"></line>
+              <line x1="23" y1="11" x2="17" y2="11"></line>
+            </svg>
+          </span>
+          <span>+ Add New Admin</span>
+        </a>
+        <?php endif; ?>
       </nav>
 
       <!-- Sidebar Footer -->
       <div class="sidebar-footer">
-        <a href="admin-homepage.html" class="sidebar-home-link">
-          <span>&larr; Back to Public Portal</span>
+        <a href="?action=logout" class="sidebar-logout-link">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+            <polyline points="16 17 21 12 16 7"></polyline>
+            <line x1="21" y1="12" x2="9" y2="12"></line>
+          </svg>
+          <span>Logout</span>
         </a>
-        <span>&copy; 2026 ALERTO Operations Center</span>
+
+        <span>&copy; 2026 CSU-COEA Student Council</span>
       </div>
 
     </aside>
@@ -114,7 +220,7 @@
             style="font-family: var(--heading-font); font-weight: 800; color: var(--admin-purple-mid); font-size: 1.15rem;">ALERTO
             Admin</span>
         </div>
-        <a href="admin-homepage.html" class="table-action-btn" style="font-size: var(--fs-2xs);">Exit Portal</a>
+        <a href="admin-homepage.php" class="table-action-btn" style="font-size: var(--fs-2xs);">Exit Portal</a>
       </header>
 
       <div class="admin-content-body">
@@ -128,7 +234,7 @@
               authenticity.</p>
           </div>
           <div class="admin-top-stat">
-            <div class="top-stat-number" id="pendingVerificationCount">14</div>
+            <div class="top-stat-number" id="pendingVerificationCount"><?= $pendingCount ?></div>
             <div class="top-stat-label">Pending Review</div>
           </div>
         </div>
@@ -173,127 +279,71 @@
                 </tr>
               </thead>
               <tbody id="verificationsTableBody">
+                <?php if (empty($students)): ?>
+                  <tr>
+                    <td colspan="7" style="text-align: center; padding: 32px; color: #666;">
+                      No student registration records found.
+                    </td>
+                  </tr>
+                <?php else: ?>
+                  <?php foreach ($students as $student): ?>
+                    <?php 
+                      $rawStatus = strtolower($student['status'] ?? 'unverified');
+                      $statusLabel = 'Pending';
+                      $statusClass = 'pending';
 
-                <!-- Row 1: Kriz Bonifacio -->
-                <tr data-status="pending" data-search="24-00909 Kriz Bonifacio BS Civil Engineering 3rd Year">
-                  <td><span class="table-id-badge">24-00909</span></td>
-                  <td>
-                    <div class="table-primary-text">Kriz Bonifacio</div>
-                    <div class="table-secondary-text">kriz@gmail.com</div>
-                  </td>
-                  <td>
-                    <span class="table-primary-text">BS Civil Engineering</span>
-                  </td>
-                  <td>3rd Year</td>
-                  <td><span class="status-pill pending">Pending</span></td>
-                  <td>Aug 8, 2026</td>
-                  <td style="text-align: right;">
-                    <button type="button" class="table-action-btn"
-                      onclick="openVerificationModal('24-00909', 'Kriz Bonifacio', '0917 890 1234', 'kriz@gmail.com', 'BS Civil Engineering', '3rd Year', 'Pending', 'Aug 8, 2026', 'COEA Student Identification Card photo uploaded for verification.')">View</button>
-                  </td>
-                </tr>
+                      if ($rawStatus === 'verified' || $rawStatus === 'approved') {
+                          $statusLabel = 'Approved';
+                          $statusClass = 'approved';
+                      } elseif ($rawStatus === 'rejected') {
+                          $statusLabel = 'Rejected';
+                          $statusClass = 'rejected';
+                      } elseif ($rawStatus === 'banned') {
+                          $statusLabel = 'Banned';
+                          $statusClass = 'banned';
+                      }
 
-                <!-- Row 2: Aries Quinto -->
-                <tr data-status="approved" data-search="2023-04412 Aries Quinto BS Architecture 2nd Year">
-                  <td><span class="table-id-badge">2023-04412</span></td>
-                  <td>
-                    <div class="table-primary-text">Aries Quinto</div>
-                    <div class="table-secondary-text">aries.quinto@csu.edu.ph</div>
-                  </td>
-                  <td>
-                    <span class="table-primary-text">BS Architecture</span>
-                  </td>
-                  <td>2nd Year</td>
-                  <td><span class="status-pill approved">Approved</span></td>
-                  <td>Aug 8, 2026</td>
-                  <td style="text-align: right;">
-                    <button type="button" class="table-action-btn"
-                      onclick="openVerificationModal('2023-04412', 'Aries Quinto', '0918 555 4321', 'aries.quinto@csu.edu.ph', 'BS Architecture', '2nd Year', 'Approved', 'Aug 8, 2026', 'COR and Certificate of Registration verified by department coordinator.')">View</button>
-                  </td>
-                </tr>
-
-                <!-- Row 3: Jade Biscuera -->
-                <tr data-status="approved" data-search="2022-01930 Jade Biscuera BS Electrical Engineering 4th Year">
-                  <td><span class="table-id-badge">2022-01930</span></td>
-                  <td>
-                    <div class="table-primary-text">Jade Biscuera</div>
-                    <div class="table-secondary-text">jade.biscuera@csu.edu.ph</div>
-                  </td>
-                  <td>
-                    <span class="table-primary-text">BS Electrical Engineering</span>
-                  </td>
-                  <td>4th Year</td>
-                  <td><span class="status-pill approved">Approved</span></td>
-                  <td>Aug 7, 2026</td>
-                  <td style="text-align: right;">
-                    <button type="button" class="table-action-btn"
-                      onclick="openVerificationModal('2022-01930', 'Jade Biscuera', '0920 123 9876', 'jade.biscuera@csu.edu.ph', 'BS Electrical Engineering', '4th Year', 'Approved', 'Aug 7, 2026', 'Active student status confirmed in university registry.')">View</button>
-                  </td>
-                </tr>
-
-                <!-- Row 4: Noriel Samoy -->
-                <tr data-status="rejected" data-search="2024-00192 Noriel Samoy BS Mechanical Engineering 1st Year">
-                  <td><span class="table-id-badge">2024-00192</span></td>
-                  <td>
-                    <div class="table-primary-text">Noriel Samoy</div>
-                    <div class="table-secondary-text">noriel.samoy@csu.edu.ph</div>
-                  </td>
-                  <td>
-                    <span class="table-primary-text">BS Mechanical Engineering</span>
-                  </td>
-                  <td>1st Year</td>
-                  <td><span class="status-pill rejected">Rejected</span></td>
-                  <td>Aug 6, 2026</td>
-                  <td style="text-align: right;">
-                    <button type="button" class="table-action-btn"
-                      onclick="openVerificationModal('2024-00192', 'Noriel Samoy', '0935 777 8899', 'noriel.samoy@csu.edu.ph', 'BS Mechanical Engineering', '1st Year', 'Rejected', 'Aug 6, 2026', 'Uploaded identification document was unreadable or blurry.')">View</button>
-                  </td>
-                </tr>
-
-                <!-- Row 5: Vhon Sarsale -->
-                <tr data-status="pending" data-search="2023-05182 Vhon Sarsale BS Chemical Engineering 2nd Year">
-                  <td><span class="table-id-badge">2023-05182</span></td>
-                  <td>
-                    <div class="table-primary-text">Vhon Sarsale</div>
-                    <div class="table-secondary-text">vhon.sarsale@csu.edu.ph</div>
-                  </td>
-                  <td>
-                    <span class="table-primary-text">BS Chemical Engineering</span>
-                  </td>
-                  <td>2nd Year</td>
-                  <td><span class="status-pill pending">Pending</span></td>
-                  <td>Aug 6, 2026</td>
-                  <td style="text-align: right;">
-                    <button type="button" class="table-action-btn"
-                      onclick="openVerificationModal('2023-05182', 'Vhon Sarsale', '0949 333 2211', 'vhon.sarsale@csu.edu.ph', 'BS Chemical Engineering', '2nd Year', 'Pending', 'Aug 6, 2026', 'Certificate of Registration submitted. Waiting for identity cross-check.')">View</button>
-                  </td>
-                </tr>
-
-                <!-- Row 6: Edward Calivoso -->
-                <tr data-status="banned" data-search="2021-09823 Edward Calivoso BS Computer Engineering 4th Year">
-                  <td><span class="table-id-badge">2021-09823</span></td>
-                  <td>
-                    <div class="table-primary-text">Edward Calivoso</div>
-                    <div class="table-secondary-text">edward.calivoso@csu.edu.ph</div>
-                  </td>
-                  <td>
-                    <span class="table-primary-text">BS Computer Engineering</span>
-                  </td>
-                  <td>4th Year</td>
-                  <td><span class="status-pill banned">Banned</span></td>
-                  <td>Aug 5, 2026</td>
-                  <td style="text-align: right;">
-                    <button type="button" class="table-action-btn"
-                      onclick="openVerificationModal('2021-09823', 'Edward Calivoso', '0908 444 1122', 'edward.calivoso@csu.edu.ph', 'BS Computer Engineering', '4th Year', 'Banned', 'Aug 5, 2026', 'Account flagged for administrative restriction due to policy violations.')">View</button>
-                  </td>
-                </tr>
-
+                      $submittedDate = !empty($student['created_at']) ? date('M j, Y', strtotime($student['created_at'])) : 'Recent';
+                      $searchString = htmlspecialchars($student['student_id'] . ' ' . $student['full_name'] . ' ' . $student['program'] . ' ' . $student['year_level']);
+                    ?>
+                    <tr data-status="<?= strtolower($statusLabel) ?>" data-search="<?= $searchString ?>">
+                      <td><span class="table-id-badge"><?= htmlspecialchars($student['student_id'] ?? 'N/A') ?></span></td>
+                      <td>
+                        <div class="table-primary-text"><?= htmlspecialchars($student['full_name']) ?></div>
+                        <div class="table-secondary-text"><?= htmlspecialchars($student['email']) ?></div>
+                      </td>
+                      <td>
+                        <span class="table-primary-text"><?= htmlspecialchars($student['program'] ?? 'N/A') ?></span>
+                      </td>
+                      <td><?= htmlspecialchars($student['year_level'] ?? 'N/A') ?></td>
+                      <td><span class="status-pill <?= $statusClass ?>"><?= $statusLabel ?></span></td>
+                      <td><?= $submittedDate ?></td>
+                      <td style="text-align: right;">
+                        <button type="button" class="table-action-btn"
+                          onclick="openVerificationModal(
+                            '<?= htmlspecialchars($student['student_id'] ?? '') ?>',
+                            '<?= htmlspecialchars($student['full_name'] ?? '') ?>',
+                            '<?= htmlspecialchars($student['contact_number'] ?? 'N/A') ?>',
+                            '<?= htmlspecialchars($student['email'] ?? '') ?>',
+                            '<?= htmlspecialchars($student['program'] ?? 'N/A') ?>',
+                            '<?= htmlspecialchars($student['year_level'] ?? 'N/A') ?>',
+                            '<?= $statusLabel ?>',
+                            '<?= $submittedDate ?>',
+                            'Database registration record submitted for verification.',
+                            <?= $student['id'] ?>,
+                            '<?= htmlspecialchars($student['id_selfie_path'] ?? '') ?>',
+                            '<?= htmlspecialchars($student['assessment_form_path'] ?? '') ?>'
+                          )">View</button>
+                      </td>
+                    </tr>
+                  <?php endforeach; ?>
+                <?php endif; ?>
               </tbody>
             </table>
           </div>
 
           <!-- Empty Search State -->
-          <div class="table-empty-state" id="verificationEmptyState">
+          <div class="table-empty-state" id="verificationEmptyState" style="display: none;">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
               stroke-linejoin="round">
               <circle cx="11" cy="11" r="8"></circle>
@@ -307,13 +357,12 @@
           <!-- Table Footer -->
           <div class="table-footer">
             <div class="table-pagination-info" id="verificationPaginationInfo">
-              Showing 1 to 6 of 14 entries
+              Showing 1 to <?= count($students) ?> entries
             </div>
             <div class="table-pagination-controls">
               <button type="button" class="pagination-btn" disabled>&larr; Previous</button>
               <button type="button" class="pagination-btn"
                 style="background: var(--admin-purple); color: #ffffff; border-color: var(--admin-purple);">1</button>
-              <button type="button" class="pagination-btn">2</button>
               <button type="button" class="pagination-btn">Next &rarr;</button>
             </div>
           </div>
@@ -331,7 +380,7 @@
       style="padding: var(--space-6); border-bottom: 1px solid var(--admin-border); display: flex; align-items: center; justify-content: space-between;">
       <div>
         <span class="admin-page-eyebrow">Student Verification</span>
-        <h3 id="modalStudentTitle" style="font-size: var(--fs-lg); color: var(--admin-text);">Kriz Bonifacio</h3>
+        <h3 id="modalStudentTitle" style="font-size: var(--fs-lg); color: var(--admin-text);">Student Name</h3>
       </div>
       <button type="button" onclick="document.getElementById('verificationDetailModal').close()"
         style="font-size: 1.5rem; color: var(--admin-muted); cursor: pointer; padding: 4px 8px; border: none; background: transparent;">&times;</button>
@@ -343,27 +392,27 @@
         style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--admin-border-subtle); padding-bottom: var(--space-2);">
         <span style="color: var(--admin-muted);">Student ID:</span>
         <strong id="modalStudentNumber"
-          style="font-family: monospace; color: var(--admin-purple-mid);">24-00909</strong>
+          style="font-family: monospace; color: var(--admin-purple-mid);">--</strong>
       </div>
       <div
         style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--admin-border-subtle); padding-bottom: var(--space-2);">
         <span style="color: var(--admin-muted);">Contact Number:</span>
-        <strong id="modalStudentContact" style="color: var(--admin-text); font-family: monospace;">0917 890 1234</strong>
+        <strong id="modalStudentContact" style="color: var(--admin-text); font-family: monospace;">--</strong>
       </div>
       <div
         style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--admin-border-subtle); padding-bottom: var(--space-2);">
         <span style="color: var(--admin-muted);">Email Address:</span>
-        <span id="modalStudentEmail">kriz@gmail.com</span>
+        <span id="modalStudentEmail">--</span>
       </div>
       <div
         style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--admin-border-subtle); padding-bottom: var(--space-2);">
         <span style="color: var(--admin-muted);">College Program:</span>
-        <strong id="modalStudentProgram" style="color: var(--admin-text);">BS Civil Engineering</strong>
+        <strong id="modalStudentProgram" style="color: var(--admin-text);">--</strong>
       </div>
       <div
         style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--admin-border-subtle); padding-bottom: var(--space-2);">
         <span style="color: var(--admin-muted);">Year Level:</span>
-        <span id="modalStudentYear">3rd Year</span>
+        <span id="modalStudentYear">--</span>
       </div>
       <div
         style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--admin-border-subtle); padding-bottom: var(--space-2);">
@@ -379,8 +428,8 @@
 
           <!-- Document 1: Selfie with Govt ID / Student ID -->
           <div
-            style="background: #faf8fc; border: 1px solid rgba(53, 34, 100, 0.15); border-radius: var(--radius-sm); padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-            <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+            style="background: #faf8fc; border: 1px solid rgba(53, 34, 100, 0.15); border-radius: var(--radius-sm); padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; overflow: hidden;">
+            <div style="display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;">
               <div
                 style="width: 32px; height: 32px; border-radius: 6px; background: #ede6f7; color: #352264; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -389,21 +438,19 @@
                   <circle cx="12" cy="13" r="4"></circle>
                 </svg>
               </div>
-              <div style="min-width: 0;">
-                <div
-                  style="font-weight: 700; font-size: var(--fs-2xs); color: var(--admin-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
-                  id="modalIdDocName">Selfie with ID</div>
-                <div style="font-size: 0.68rem; color: var(--admin-muted);">csu_id_selfie.png</div>
+              <div style="min-width: 0; flex: 1;">
+                <div style="font-weight: 700; font-size: var(--fs-2xs); color: var(--admin-text);">Selfie with ID</div>
+                <div style="font-size: 0.68rem; color: var(--admin-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" id="modalIdDocFilename">csu_id_selfie.png</div>
               </div>
             </div>
-            <button type="button" onclick="alert('Viewing attached ID photo: csu_id_selfie.png')"
+            <button type="button" onclick="viewSelfieDocument()"
               class="table-action-btn" style="padding: 3px 8px; font-size: 0.7rem; flex-shrink: 0;">View</button>
           </div>
 
           <!-- Document 2: Assessment Form / COR -->
           <div
-            style="background: #faf8fc; border: 1px solid rgba(53, 34, 100, 0.15); border-radius: var(--radius-sm); padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-            <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+            style="background: #faf8fc; border: 1px solid rgba(53, 34, 100, 0.15); border-radius: var(--radius-sm); padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; overflow: hidden;">
+            <div style="display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;">
               <div
                 style="width: 32px; height: 32px; border-radius: 6px; background: #ede6f7; color: #352264; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -414,14 +461,12 @@
                   <line x1="16" y1="17" x2="8" y2="17"></line>
                 </svg>
               </div>
-              <div style="min-width: 0;">
-                <div
-                  style="font-weight: 700; font-size: var(--fs-2xs); color: var(--admin-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
-                  id="modalCorDocName">Assessment Form</div>
-                <div style="font-size: 0.68rem; color: var(--admin-muted);">cor_assessment_2026.pdf</div>
+              <div style="min-width: 0; flex: 1;">
+                <div style="font-weight: 700; font-size: var(--fs-2xs); color: var(--admin-text);">Assessment Form</div>
+                <div style="font-size: 0.68rem; color: var(--admin-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" id="modalCorDocFilename">cor_assessment_2026.pdf</div>
               </div>
             </div>
-            <button type="button" onclick="alert('Viewing attached Assessment Form: cor_assessment_2026.pdf')"
+            <button type="button" onclick="viewCorDocument()"
               class="table-action-btn" style="padding: 3px 8px; font-size: 0.7rem; flex-shrink: 0;">View</button>
           </div>
 
@@ -432,12 +477,12 @@
         <span style="color: var(--admin-muted); display: block; margin-bottom: 4px;">Verification Notes:</span>
         <div id="modalStudentNotes"
           style="background: var(--admin-bg); padding: var(--space-3); border-radius: var(--radius-sm); color: var(--admin-text-secondary); line-height: 1.5;">
-          COEA Student Identification Card photo uploaded for verification.
+          Database record loaded for review.
         </div>
       </div>
     </div>
 
-    <!-- Modal Footer Actions (Includes Dynamic Archive Option When Completed) -->
+    <!-- Modal Footer Actions -->
     <div
       style="padding: var(--space-4) var(--space-6); background: var(--admin-bg); border-top: 1px solid var(--admin-border); display: flex; justify-content: flex-end; align-items: center; gap: var(--space-3); flex-wrap: wrap;" id="verificationModalFooterActions">
       <!-- Populated dynamically based on verification status -->
@@ -448,14 +493,17 @@
   <script src="assets/js/main.js"></script>
   <script>
     let currentStudentId = '';
+    let currentDatabaseId = null;
+    let currentSelfiePath = '';
+    let currentCorPath = '';
 
-    // Dynamic Action Buttons Generator for Verification Modal
+    // Dynamic Action Buttons Generator for Verification Modal (Cancel/Close only when approved/non-pending)
     function renderVerificationModalActions(status) {
       const footerEl = document.getElementById('verificationModalFooterActions');
       if (!footerEl) return;
       const statusLower = (status || '').toLowerCase().trim();
 
-      if (statusLower === 'pending') {
+      if (statusLower === 'pending' || statusLower === 'unverified') {
         footerEl.innerHTML = `
           <button type="button" class="table-action-btn" onclick="document.getElementById('verificationDetailModal').close()">Close</button>
           <button type="button" class="table-action-btn" style="border-color: #2e2838; color: #2e2838; background: #ffffff;" onmouseenter="this.style.background='#f6f3fc'" onmouseleave="this.style.background='#ffffff'" onclick="handleModalBanAction()">Ban Account</button>
@@ -463,116 +511,123 @@
           <button type="button" class="table-action-btn btn-filled" onclick="handleModalApproveAction()">Approve Profile</button>
         `;
       } else {
-        // When completed / approved / rejected / banned
         footerEl.innerHTML = `
-          <button type="button" class="table-action-btn" onclick="document.getElementById('verificationDetailModal').close()">Close</button>
-          <button type="button" class="table-action-btn btn-filled" onclick="handleModalArchiveAction()">Archive</button>
+          <button type="button" class="table-action-btn" onclick="document.getElementById('verificationDetailModal').close()">Cancel</button>
         `;
       }
     }
 
-    // Modal Handler
-    function openVerificationModal(studentId, name, contact, email, program, year, status, submitted, notes) {
+    // Modal Handler updated to accept selfiePath and corPath
+    function openVerificationModal(studentId, name, contact, email, program, year, status, submitted, notes, dbId, selfiePath, corPath) {
       currentStudentId = studentId;
-
-      let contactVal = contact;
-      let emailVal = email;
-      let progVal = program;
-      let yrVal = year;
-      let statVal = status;
-      let notesVal = notes;
-
-      if (typeof contact === 'string' && contact.includes('@')) {
-        // Fallback for 8-argument signature
-        notesVal = submitted;
-        statVal = year;
-        yrVal = program;
-        progVal = email;
-        emailVal = contact;
-        contactVal = '0917 890 1234';
-      }
+      currentDatabaseId = dbId;
+      currentSelfiePath = selfiePath;
+      currentCorPath = corPath;
 
       document.getElementById('modalStudentTitle').textContent = name;
       document.getElementById('modalStudentNumber').textContent = studentId;
-      document.getElementById('modalStudentContact').textContent = contactVal || '0917 890 1234';
-      document.getElementById('modalStudentEmail').textContent = emailVal;
-      document.getElementById('modalStudentProgram').textContent = progVal;
-      document.getElementById('modalStudentYear').textContent = yrVal;
-      document.getElementById('modalStudentNotes').textContent = notesVal;
+      document.getElementById('modalStudentContact').textContent = contact || 'N/A';
+      document.getElementById('modalStudentEmail').textContent = email;
+      document.getElementById('modalStudentProgram').textContent = program;
+      document.getElementById('modalStudentYear').textContent = year;
+      document.getElementById('modalStudentNotes').textContent = notes;
+
+      // Update filename text labels in UI
+      if (selfiePath) {
+          document.getElementById('modalIdDocFilename').textContent = selfiePath.split('/').pop();
+      } else {
+          document.getElementById('modalIdDocFilename').textContent = 'No file uploaded';
+      }
+
+      if (corPath) {
+          document.getElementById('modalCorDocFilename').textContent = corPath.split('/').pop();
+      } else {
+          document.getElementById('modalCorDocFilename').textContent = 'No file uploaded';
+      }
 
       const badgeEl = document.getElementById('modalStudentStatusBadge');
       let pillClass = 'pending';
-      const statusLower = (statVal || '').toLowerCase().trim();
-      if (statusLower === 'approved') pillClass = 'approved';
+      const statusLower = (status || '').toLowerCase().trim();
+      if (statusLower === 'approved' || statusLower === 'verified') pillClass = 'approved';
       else if (statusLower === 'rejected') pillClass = 'rejected';
       else if (statusLower === 'banned') pillClass = 'banned';
-      badgeEl.innerHTML = `<span class="status-pill ${pillClass}">${statVal}</span>`;
+      
+      badgeEl.innerHTML = `<span class="status-pill ${pillClass}">${status}</span>`;
 
-      // Render dynamic buttons based on whether status is pending or completed
-      renderVerificationModalActions(statVal);
+      renderVerificationModalActions(status);
 
       const modal = document.getElementById('verificationDetailModal');
       if (modal) modal.showModal();
     }
 
-    // Update Row Status in Main Verification Table
-    function updateVerificationRowStatus(studentId, newStatus) {
-      const rows = document.querySelectorAll('#verificationsTableBody tr');
-      const pillClass = newStatus.toLowerCase().replace(/\s+/g, '-');
-      
-      rows.forEach(row => {
-        const idBadge = row.querySelector('.table-id-badge');
-        if (idBadge && idBadge.textContent.trim() === studentId) {
-          row.setAttribute('data-status', newStatus.toLowerCase());
-          const statusCell = row.children[4];
-          if (statusCell) {
-            statusCell.innerHTML = `<span class="status-pill ${pillClass}">${newStatus}</span>`;
-          }
-          const actionBtn = row.querySelector('.table-action-btn');
-          if (actionBtn) {
-            const currentOnclick = actionBtn.getAttribute('onclick') || '';
-            const updatedOnclick = currentOnclick.replace(/'(Pending|Approved|Rejected|Banned)'/i, `'${newStatus}'`);
-            actionBtn.setAttribute('onclick', updatedOnclick);
-            actionBtn.textContent = 'View';
-            actionBtn.className = 'table-action-btn';
-          }
+    // Handlers to open document paths in new tabs
+    function viewSelfieDocument() {
+        if (currentSelfiePath) {
+            window.open(currentSelfiePath, '_blank');
+        } else {
+            alert('No Selfie ID document found for this user.');
         }
+    }
+
+    function viewCorDocument() {
+        if (currentCorPath) {
+            window.open(currentCorPath, '_blank');
+        } else {
+            alert('No Assessment Form (COR) document found for this user.');
+        }
+    }
+
+    // Send Database Status Update via Fetch
+    function sendStatusUpdateToServer(newStatus, successMessage) {
+      if (!currentDatabaseId) return;
+
+      const formData = new URLSearchParams();
+      formData.append('user_id', currentDatabaseId);
+      formData.append('status', newStatus);
+
+      fetch('admin-verify.php', {
+          method: 'POST',
+          headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'X-Requested-With': 'XMLHttpRequest'
+          },
+          body: formData.toString()
+      })
+      .then(response => response.json())
+      .then(data => {
+          if (data.success) {
+              alert(successMessage);
+              window.location.reload();
+          } else {
+              alert('Failed to update status in the database.');
+          }
+      })
+      .catch(error => {
+          console.error('Error:', error);
+          window.location.reload();
       });
     }
 
     // Modal Action Handlers
-    function handleModalArchiveAction() {
-      const studentName = document.getElementById('modalStudentTitle').textContent;
-      if (confirm(`Archive verification record for ${studentName} (${currentStudentId})?\n\nThis will move the student profile to the archives registry.`)) {
-        alert(`Record for ${studentName} (${currentStudentId}) has been successfully ARCHIVED.`);
-        document.getElementById('verificationDetailModal').close();
-      }
-    }
-
     function handleModalBanAction() {
       const studentName = document.getElementById('modalStudentTitle').textContent;
-      if (confirm(`Are you sure you want to BAN the account of ${studentName} (${currentStudentId})?\n\nThis will revoke student portal access and flag this profile.`)) {
-        document.getElementById('modalStudentStatusBadge').innerHTML = '<span class="status-pill banned">Banned</span>';
-        updateVerificationRowStatus(currentStudentId, 'Banned');
-        alert(`Account for ${studentName} (${currentStudentId}) has been successfully BANNED.`);
-        document.getElementById('verificationDetailModal').close();
+      if (confirm(`Are you sure you want to BAN the account of ${studentName} (${currentStudentId})?`)) {
+          sendStatusUpdateToServer('banned', `Account for ${studentName} has been successfully BANNED.`);
       }
     }
 
     function handleModalRejectAction() {
       const studentName = document.getElementById('modalStudentTitle').textContent;
-      document.getElementById('modalStudentStatusBadge').innerHTML = '<span class="status-pill rejected">Rejected</span>';
-      updateVerificationRowStatus(currentStudentId, 'Rejected');
-      alert(`Student application for ${studentName} marked as Rejected.`);
-      document.getElementById('verificationDetailModal').close();
+      if (confirm(`Are you sure you want to REJECT the application for ${studentName}?`)) {
+          sendStatusUpdateToServer('rejected', `Student application for ${studentName} marked as Rejected.`);
+      }
     }
 
     function handleModalApproveAction() {
       const studentName = document.getElementById('modalStudentTitle').textContent;
-      document.getElementById('modalStudentStatusBadge').innerHTML = '<span class="status-pill approved">Approved</span>';
-      updateVerificationRowStatus(currentStudentId, 'Approved');
-      alert(`Student profile for ${studentName} successfully Verified and Approved.`);
-      document.getElementById('verificationDetailModal').close();
+      if (confirm(`Are you sure you want to APPROVE the profile for ${studentName}?`)) {
+          sendStatusUpdateToServer('verified', `Student profile for ${studentName} successfully Verified and Approved.`);
+      }
     }
 
     // Search and Filter logic
@@ -582,6 +637,7 @@
       const tableRows = document.querySelectorAll('#verificationsTableBody tr');
       const emptyState = document.getElementById('verificationEmptyState');
       const paginationInfo = document.getElementById('verificationPaginationInfo');
+      const totalEntries = tableRows.length;
 
       function filterTable() {
         const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
@@ -607,7 +663,7 @@
           emptyState.style.display = visibleCount === 0 ? 'block' : 'none';
         }
         if (paginationInfo) {
-          paginationInfo.textContent = `Showing 1 to ${visibleCount} of 14 entries`;
+          paginationInfo.textContent = `Showing 1 to ${visibleCount} of ${totalEntries} entries`;
         }
       }
 
