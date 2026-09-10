@@ -1,7 +1,7 @@
 <?php
 // C:\laragon\www\ALERTO-MAIN\alerto-db.php
 
-$host = 'localhost';
+$host = '127.0.0.1';
 $dbname = 'alerto-database';
 $username = 'root';
 $password = '';
